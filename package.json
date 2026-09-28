@@ -1,15 +1,13 @@
 {
-  "name": "tg-bot-login",
+  "name": "jarvis-bot",
   "version": "1.0.0",
+  "description": "J.A.R.V.I.S Telegram subscription bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
+    "better-sqlite3": "^11.7.0",
     "node-telegram-bot-api": "^0.66.0"
-  },
-  "engines": {
-    "node": ">=18"
   }
 }
