@@ -9,10 +9,9 @@ const fs = require("fs");
 // Регистрация удалена.
 // SMTP не используется.
 // Вход = проверка активной подписки.
-// После подтверждения оплаты пользователь получает ключ.
-// Ключ = Telegram ID пользователя.
+// После подтверждения оплаты пользователь получает сообщение
+// для связи с поддержкой приложения.
 // ============================================================
-
 
 // ============================================================
 // НАСТРОЙКИ
@@ -34,7 +33,6 @@ const CARD_NUMBER =
 const CARD_HOLDER =
     process.env.CARD_HOLDER || "Получатель: Алексей М.";
 
-
 // ============================================================
 // ПРОВЕРКА TOKEN
 // ============================================================
@@ -44,7 +42,6 @@ if (!BOT_TOKEN) {
     process.exit(1);
 }
 
-
 // ============================================================
 // TELEGRAM BOT
 // ============================================================
@@ -52,7 +49,6 @@ if (!BOT_TOKEN) {
 const bot = new TelegramBot(BOT_TOKEN, {
     polling: true
 });
-
 
 // ============================================================
 // DATABASE
@@ -66,13 +62,11 @@ const db = new Database(DB_FILE);
 
 db.pragma("journal_mode = WAL");
 
-
 // ============================================================
 // DATABASE FUNCTIONS
 // ============================================================
 
 function columnExists(table, column) {
-
     const columns = db
         .prepare(`PRAGMA table_info(${table})`)
         .all();
@@ -82,18 +76,14 @@ function columnExists(table, column) {
     );
 }
 
-
 function addColumn(table, column, definition) {
-
     if (!columnExists(table, column)) {
-
         db.exec(`
             ALTER TABLE ${table}
             ADD COLUMN ${column} ${definition}
         `);
     }
 }
-
 
 function initDb() {
 
@@ -110,9 +100,7 @@ function initDb() {
 
             sub_until TEXT,
 
-            total_paid INTEGER DEFAULT 0,
-
-            app_key TEXT
+            total_paid INTEGER DEFAULT 0
 
         );
 
@@ -149,7 +137,6 @@ function initDb() {
         );
     `);
 
-
     addColumn(
         "users",
         "username",
@@ -181,13 +168,6 @@ function initDb() {
     );
 
     addColumn(
-        "users",
-        "app_key",
-        "TEXT"
-    );
-
-
-    addColumn(
         "payments",
         "name",
         "TEXT"
@@ -198,7 +178,6 @@ function initDb() {
         "email",
         "TEXT"
     );
-
 
     for (const adminId of ADMIN_IDS) {
 
@@ -214,13 +193,11 @@ function initDb() {
     }
 }
 
-
 // ============================================================
 // ИНИЦИАЛИЗАЦИЯ БАЗЫ
 // ============================================================
 
 initDb();
-
 
 // ============================================================
 // USERS
@@ -240,7 +217,6 @@ function upsertUser(userId, username = null) {
         username
     );
 
-
     if (username) {
 
         db.prepare(`
@@ -254,7 +230,6 @@ function upsertUser(userId, username = null) {
     }
 }
 
-
 function getUser(userId) {
 
     return db.prepare(`
@@ -263,42 +238,6 @@ function getUser(userId) {
         WHERE user_id = ?
     `).get(userId);
 }
-
-
-// ============================================================
-// APP KEY
-// ============================================================
-
-// Ключ приложения = Telegram ID пользователя.
-// Например:
-// Telegram ID: 8723208814
-// Ключ:        8723208814
-
-function generateAppKey(userId) {
-
-    return String(userId);
-}
-
-
-function getOrCreateAppKey(userId) {
-
-    const key =
-        generateAppKey(userId);
-
-
-    db.prepare(`
-        UPDATE users
-        SET app_key = ?
-        WHERE user_id = ?
-    `).run(
-        key,
-        userId
-    );
-
-
-    return key;
-}
-
 
 // ============================================================
 // TARIFFS
@@ -344,7 +283,6 @@ const TARIFFS = {
 
 };
 
-
 // ============================================================
 // ADMIN
 // ============================================================
@@ -356,7 +294,6 @@ function isAdmin(userId) {
     );
 }
 
-
 function getAdminStatus(userId) {
 
     const row =
@@ -366,14 +303,12 @@ function getAdminStatus(userId) {
             WHERE user_id = ?
         `).get(userId);
 
-
     if (!row) {
 
         return {
             online: false
         };
     }
-
 
     if (
         row.online === 0 &&
@@ -384,7 +319,6 @@ function getAdminStatus(userId) {
             new Date(
                 row.offline_until
             );
-
 
         if (
             until <= new Date()
@@ -398,13 +332,11 @@ function getAdminStatus(userId) {
                 WHERE user_id = ?
             `).run(userId);
 
-
             return {
                 online: true
             };
         }
     }
-
 
     return {
 
@@ -416,7 +348,6 @@ function getAdminStatus(userId) {
     };
 }
 
-
 function setAdminOnline(userId) {
 
     db.prepare(`
@@ -427,7 +358,6 @@ function setAdminOnline(userId) {
         WHERE user_id = ?
     `).run(userId);
 }
-
 
 function setAdminOffline(userId, until) {
 
@@ -443,7 +373,6 @@ function setAdminOffline(userId, until) {
     );
 }
 
-
 function getOnlineAdminsCount() {
 
     return ADMIN_IDS.filter(
@@ -451,7 +380,6 @@ function getOnlineAdminsCount() {
             getAdminStatus(id).online
     ).length;
 }
-
 
 function getStatusText() {
 
@@ -462,14 +390,12 @@ function getStatusText() {
         return "🟢 Администратор в онлайне";
     }
 
-
     return (
         "🔴 Администратор сейчас " +
         "не может одобрить заявку.\n" +
         "Пожалуйста, подождите."
     );
 }
-
 
 // ============================================================
 // OFFLINE TIME
@@ -489,7 +415,6 @@ function parseOfflineTime(text) {
 
     let found = false;
 
-
     while (
         (match = regex.exec(value))
     ) {
@@ -501,7 +426,6 @@ function parseOfflineTime(text) {
 
         const unit =
             match[2];
-
 
         if (unit === "d") {
             totalSeconds +=
@@ -524,7 +448,6 @@ function parseOfflineTime(text) {
         }
     }
 
-
     const cleaned =
         value
             .replace(
@@ -532,7 +455,6 @@ function parseOfflineTime(text) {
                 ""
             )
             .trim();
-
 
     if (
         !found ||
@@ -543,7 +465,6 @@ function parseOfflineTime(text) {
         return null;
     }
 
-
     if (
         totalSeconds >
         15 * 86400
@@ -552,15 +473,12 @@ function parseOfflineTime(text) {
         return "MAX";
     }
 
-
     return totalSeconds;
 }
-
 
 function formatDuration(seconds) {
 
     const result = [];
-
 
     const days =
         Math.floor(
@@ -569,7 +487,6 @@ function formatDuration(seconds) {
 
     seconds %= 86400;
 
-
     const hours =
         Math.floor(
             seconds / 3600
@@ -577,14 +494,12 @@ function formatDuration(seconds) {
 
     seconds %= 3600;
 
-
     const minutes =
         Math.floor(
             seconds / 60
         );
 
     seconds %= 60;
-
 
     if (days) {
         result.push(`${days}д`);
@@ -602,10 +517,8 @@ function formatDuration(seconds) {
         result.push(`${seconds}сек`);
     }
 
-
     return result.join(" ");
 }
-
 
 // ============================================================
 // SUBSCRIPTION
@@ -616,7 +529,6 @@ function isSubActive(userId) {
     const user =
         getUser(userId);
 
-
     if (
         !user ||
         !user.sub_until
@@ -625,7 +537,6 @@ function isSubActive(userId) {
         return false;
     }
 
-
     return (
         new Date(
             user.sub_until
@@ -633,20 +544,16 @@ function isSubActive(userId) {
     );
 }
 
-
 function setSubscription(userId, days) {
 
     const user =
         getUser(userId);
 
-
     const now =
         new Date();
 
-
     let start =
         now;
-
 
     if (
         user &&
@@ -658,7 +565,6 @@ function setSubscription(userId, days) {
                 user.sub_until
             );
 
-
         if (
             current > now
         ) {
@@ -668,13 +574,11 @@ function setSubscription(userId, days) {
         }
     }
 
-
     const newUntil =
         new Date(
             start.getTime() +
             days * 86400000
         );
-
 
     db.prepare(`
         UPDATE users
@@ -685,10 +589,8 @@ function setSubscription(userId, days) {
         userId
     );
 
-
     return newUntil;
 }
-
 
 // ============================================================
 // ORDERS
@@ -704,20 +606,17 @@ function createOrder(
     const tariff =
         TARIFFS[tariffKey];
 
-
     if (!tariff) {
         throw new Error(
             "Тариф не найден"
         );
     }
 
-
     const orderId =
         crypto
             .randomBytes(5)
             .toString("hex")
             .toUpperCase();
-
 
     db.prepare(`
         INSERT INTO payments
@@ -735,15 +634,21 @@ function createOrder(
     `).run(
 
         orderId,
+
         userId,
+
         tariffKey,
+
         tariff.price,
+
         "pending",
+
         new Date().toISOString(),
+
         name,
+
         email
     );
-
 
     db.prepare(`
         UPDATE users
@@ -757,10 +662,8 @@ function createOrder(
         userId
     );
 
-
     return orderId;
 }
-
 
 function getOrder(orderId) {
 
@@ -770,7 +673,6 @@ function getOrder(orderId) {
         WHERE order_id = ?
     `).get(orderId);
 }
-
 
 function getPendingOrder(userId) {
 
@@ -785,7 +687,6 @@ function getPendingOrder(userId) {
     `).get(userId);
 }
 
-
 // ============================================================
 // CONFIRM ORDER
 // ============================================================
@@ -795,7 +696,6 @@ function confirmOrder(orderId) {
     const order =
         getOrder(orderId);
 
-
     if (!order) {
 
         return {
@@ -803,7 +703,6 @@ function confirmOrder(orderId) {
             reason: "not_found"
         };
     }
-
 
     if (
         order.status !== "pending"
@@ -815,10 +714,8 @@ function confirmOrder(orderId) {
         };
     }
 
-
     const tariff =
         TARIFFS[order.tariff];
-
 
     if (!tariff) {
 
@@ -828,19 +725,11 @@ function confirmOrder(orderId) {
         };
     }
 
-
     const until =
         setSubscription(
             order.user_id,
             tariff.days
         );
-
-
-    const key =
-        getOrCreateAppKey(
-            order.user_id
-        );
-
 
     db.prepare(`
         UPDATE payments
@@ -855,7 +744,6 @@ function confirmOrder(orderId) {
         orderId
     );
 
-
     db.prepare(`
         UPDATE users
         SET total_paid =
@@ -866,7 +754,6 @@ function confirmOrder(orderId) {
         order.user_id
     );
 
-
     return {
 
         success: true,
@@ -876,12 +763,9 @@ function confirmOrder(orderId) {
 
         until,
 
-        key,
-
         order
     };
 }
-
 
 // ============================================================
 // REJECT
@@ -892,7 +776,6 @@ function rejectOrder(orderId) {
     const order =
         getOrder(orderId);
 
-
     if (!order) {
 
         return {
@@ -900,7 +783,6 @@ function rejectOrder(orderId) {
             reason: "not_found"
         };
     }
-
 
     if (
         order.status !== "pending"
@@ -912,7 +794,6 @@ function rejectOrder(orderId) {
         };
     }
 
-
     db.prepare(`
         UPDATE payments
         SET status = 'rejected'
@@ -920,7 +801,6 @@ function rejectOrder(orderId) {
             order_id = ?
             AND status = 'pending'
     `).run(orderId);
-
 
     return {
 
@@ -933,7 +813,6 @@ function rejectOrder(orderId) {
     };
 }
 
-
 // ============================================================
 // EMAIL
 // ============================================================
@@ -943,7 +822,6 @@ function validEmail(email) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/
         .test(email);
 }
-
 
 // ============================================================
 // MAIN MENU
@@ -989,7 +867,6 @@ function mainMenu() {
         }
     };
 }
-
 
 // ============================================================
 // BUY MENU
@@ -1057,7 +934,6 @@ function buyMenu() {
     };
 }
 
-
 // ============================================================
 // ADMIN MENU
 // ============================================================
@@ -1096,7 +972,6 @@ function adminMenu() {
     };
 }
 
-
 // ============================================================
 // ADMIN ORDER BUTTONS
 // ============================================================
@@ -1128,7 +1003,6 @@ function adminOrderButtons(orderId) {
     };
 }
 
-
 // ============================================================
 // STATES
 // ============================================================
@@ -1138,7 +1012,6 @@ const userStates =
 
 const adminWaitingTime =
     new Set();
-
 
 // ============================================================
 // START
@@ -1153,12 +1026,10 @@ bot.onText(
             const userId =
                 msg.from.id;
 
-
             upsertUser(
                 userId,
                 msg.from.username || null
             );
-
 
             const welcomeText =
 
@@ -1171,19 +1042,17 @@ bot.onText(
                 "к приложению.\n\n" +
 
                 "🔐 После подтверждения оплаты " +
-                "вам будет выдан персональный ключ.\n\n" +
+                "свяжитесь с поддержкой приложения.\n\n" +
 
                 "🛒 Выберите тариф через кнопку «Купить».\n\n" +
 
                 getStatusText();
-
 
             await bot.sendMessage(
                 msg.chat.id,
                 welcomeText,
                 mainMenu()
             );
-
 
             if (
                 isAdmin(userId)
@@ -1212,7 +1081,6 @@ bot.onText(
     }
 );
 
-
 // ============================================================
 // /ID
 // ============================================================
@@ -1232,7 +1100,6 @@ bot.onText(
     }
 );
 
-
 // ============================================================
 // /ADMIN
 // ============================================================
@@ -1250,7 +1117,6 @@ bot.onText(
             return;
         }
 
-
         await bot.sendMessage(
 
             msg.chat.id,
@@ -1264,7 +1130,6 @@ bot.onText(
         );
     }
 );
-
 
 // ============================================================
 // MESSAGE
@@ -1280,20 +1145,16 @@ bot.on(
                 return;
             }
 
-
             const text =
                 msg.text.trim();
 
-
             const userId =
                 msg.from.id;
-
 
             upsertUser(
                 userId,
                 msg.from.username || null
             );
-
 
             // ==================================================
             // ADMIN OFFLINE TIME
@@ -1306,7 +1167,6 @@ bot.on(
 
                 const seconds =
                     parseOfflineTime(text);
-
 
                 if (
                     seconds === "MAX"
@@ -1329,7 +1189,6 @@ bot.on(
                     return;
                 }
 
-
                 if (
                     seconds === null
                 ) {
@@ -1351,24 +1210,20 @@ bot.on(
                     return;
                 }
 
-
                 const until =
                     new Date(
                         Date.now() +
                         seconds * 1000
                     );
 
-
                 setAdminOffline(
                     userId,
                     until
                 );
 
-
                 adminWaitingTime.delete(
                     userId
                 );
-
 
                 await bot.sendMessage(
 
@@ -1390,10 +1245,8 @@ bot.on(
                     adminMenu()
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // ADMIN ONLINE
@@ -1406,7 +1259,6 @@ bot.on(
 
                 setAdminOnline(userId);
 
-
                 await bot.sendMessage(
 
                     msg.chat.id,
@@ -1417,10 +1269,8 @@ bot.on(
                     adminMenu()
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // ADMIN OFFLINE
@@ -1434,7 +1284,6 @@ bot.on(
                 adminWaitingTime.add(
                     userId
                 );
-
 
                 await bot.sendMessage(
 
@@ -1451,10 +1300,8 @@ bot.on(
                     "⚠️ Максимум — 15 дней."
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // LOGIN
@@ -1482,41 +1329,23 @@ bot.on(
                         mainMenu()
                     );
 
-
                     return;
                 }
-
-
-                const key =
-                    getOrCreateAppKey(
-                        userId
-                    );
-
 
                 await bot.sendMessage(
 
                     msg.chat.id,
 
-                    "✅ Вход разрешён!\n\n" +
+                    "🔐 Ваша подписка активна.\n\n" +
 
-                    "🔑 Ваш ключ:\n\n" +
+                    "Чтобы войти в приложение " +
+                    "свяжитесь с @JARBIS_help",
 
-                    `\`${key}\`\n\n` +
-
-                    "📱 Откройте приложение J.A.R.B.I.S\n" +
-
-                    "и введите этот ключ для входа.",
-
-                    {
-                        parse_mode: "Markdown",
-                        ...mainMenu()
-                    }
+                    mainMenu()
                 );
-
 
                 return;
             }
-
 
             // ==================================================
             // BUY
@@ -1538,10 +1367,8 @@ bot.on(
                     buyMenu()
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // SUPPORT
@@ -1566,10 +1393,8 @@ bot.on(
                     mainMenu()
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // HELP
@@ -1586,7 +1411,7 @@ bot.on(
                     "ℹ️ Помощь\n\n" +
 
                     "🔐 Войти — проверить активную " +
-                    "подписку и получить ключ.\n\n" +
+                    "подписку.\n\n" +
 
                     "🛒 Купить — выбрать тариф и оформить заказ.\n\n" +
 
@@ -1601,10 +1426,8 @@ bot.on(
                     mainMenu()
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // MY ACCOUNT
@@ -1617,10 +1440,8 @@ bot.on(
                 const user =
                     getUser(userId);
 
-
                 let subscription =
                     "❌ Активной подписки нет.";
-
 
                 if (
                     isSubActive(userId)
@@ -1637,7 +1458,6 @@ bot.on(
                             )
                         }`;
                 }
-
 
                 await bot.sendMessage(
 
@@ -1666,10 +1486,8 @@ bot.on(
                     mainMenu()
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // BUY STATE
@@ -1678,11 +1496,9 @@ bot.on(
             const state =
                 userStates.get(userId);
 
-
             if (!state) {
                 return;
             }
-
 
             // ==================================================
             // BUY NAME
@@ -1710,19 +1526,16 @@ bot.on(
                     return;
                 }
 
-
                 state.name =
                     text;
 
                 state.step =
                     "email";
 
-
                 userStates.set(
                     userId,
                     state
                 );
-
 
                 await bot.sendMessage(
 
@@ -1734,10 +1547,8 @@ bot.on(
                     "example@gmail.com"
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // BUY EMAIL
@@ -1750,7 +1561,6 @@ bot.on(
 
                 const email =
                     text.toLowerCase().trim();
-
 
                 if (
                     !validEmail(email)
@@ -1767,12 +1577,10 @@ bot.on(
                     return;
                 }
 
-
                 const tariff =
                     TARIFFS[
                         state.tariffKey
                     ];
-
 
                 const orderId =
                     createOrder(
@@ -1786,11 +1594,9 @@ bot.on(
                         email
                     );
 
-
                 userStates.delete(
                     userId
                 );
-
 
                 await bot.sendMessage(
 
@@ -1845,7 +1651,6 @@ bot.on(
                     }
                 );
 
-
                 return;
             }
 
@@ -1858,7 +1663,6 @@ bot.on(
         }
     }
 );
-
 
 // ============================================================
 // CALLBACK QUERY
@@ -1873,18 +1677,14 @@ bot.on(
             const data =
                 query.data;
 
-
             const chatId =
                 query.message.chat.id;
-
 
             const messageId =
                 query.message.message_id;
 
-
             const userId =
                 query.from.id;
-
 
             // ==================================================
             // BACK
@@ -1902,11 +1702,9 @@ bot.on(
                     userId
                 );
 
-
                 await bot.answerCallbackQuery(
                     query.id
                 );
-
 
                 await bot.sendMessage(
 
@@ -1921,10 +1719,8 @@ bot.on(
                     mainMenu()
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // ADMIN ONLINE
@@ -1951,9 +1747,7 @@ bot.on(
                     return;
                 }
 
-
                 setAdminOnline(userId);
-
 
                 await bot.answerCallbackQuery(
 
@@ -1963,7 +1757,6 @@ bot.on(
                         text: "Вы онлайн 🟢"
                     }
                 );
-
 
                 await bot.sendMessage(
 
@@ -1975,10 +1768,8 @@ bot.on(
                     adminMenu()
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // ADMIN OFFLINE
@@ -2005,16 +1796,13 @@ bot.on(
                     return;
                 }
 
-
                 adminWaitingTime.add(
                     userId
                 );
 
-
                 await bot.answerCallbackQuery(
                     query.id
                 );
-
 
                 await bot.sendMessage(
 
@@ -2031,10 +1819,8 @@ bot.on(
                     "⚠️ Максимум — 15 дней."
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // BUY
@@ -2047,10 +1833,8 @@ bot.on(
                 const tariffKey =
                     data.substring(4);
 
-
                 const tariff =
                     TARIFFS[tariffKey];
-
 
                 if (!tariff) {
 
@@ -2067,7 +1851,6 @@ bot.on(
                     return;
                 }
 
-
                 userStates.set(
 
                     userId,
@@ -2079,11 +1862,9 @@ bot.on(
                     }
                 );
 
-
                 await bot.answerCallbackQuery(
                     query.id
                 );
-
 
                 await bot.sendMessage(
 
@@ -2096,10 +1877,8 @@ bot.on(
                     "👤 Введите ваше имя:"
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // PAID
@@ -2112,10 +1891,8 @@ bot.on(
                 const orderId =
                     data.substring(5);
 
-
                 const order =
                     getOrder(orderId);
-
 
                 if (!order) {
 
@@ -2131,7 +1908,6 @@ bot.on(
 
                     return;
                 }
-
 
                 if (
                     order.user_id !== userId
@@ -2151,11 +1927,9 @@ bot.on(
                     return;
                 }
 
-
                 await bot.answerCallbackQuery(
                     query.id
                 );
-
 
                 await bot.sendMessage(
 
@@ -2183,10 +1957,8 @@ bot.on(
                     }
                 );
 
-
                 return;
             }
-
 
             // ==================================================
             // CONFIRM
@@ -2213,16 +1985,13 @@ bot.on(
                     return;
                 }
 
-
                 const orderId =
                     data.substring(8);
-
 
                 const result =
                     confirmOrder(
                         orderId
                     );
-
 
                 if (
                     !result.success
@@ -2246,7 +2015,6 @@ bot.on(
                     return;
                 }
 
-
                 await bot.answerCallbackQuery(
 
                     query.id,
@@ -2256,7 +2024,6 @@ bot.on(
                             "Оплата подтверждена ✅"
                     }
                 );
-
 
                 try {
 
@@ -2274,12 +2041,14 @@ bot.on(
 
                 } catch (_) {}
 
-
                 await bot.sendMessage(
 
                     result.userId,
 
                     "🎉 Оплата подтверждена!\n\n" +
+
+                    "Чтобы войти в приложение " +
+                    "свяжитесь с @JARBIS_help\n\n" +
 
                     `👤 Имя: ${result.order.name}\n` +
 
@@ -2295,26 +2064,13 @@ bot.on(
 
                     `${result.until.toLocaleString(
                         "ru-RU"
-                    )}\n\n` +
+                    )}`,
 
-                    "🔑 Ваш ключ:\n\n" +
-
-                    `\`${result.key}\`\n\n` +
-
-                    "📱 Откройте приложение J.A.R.B.I.S\n" +
-
-                    "и введите этот ключ для входа.",
-
-                    {
-                        parse_mode: "Markdown",
-                        ...mainMenu()
-                    }
+                    mainMenu()
                 );
-
 
                 return;
             }
-
 
             // ==================================================
             // REJECT
@@ -2341,16 +2097,13 @@ bot.on(
                     return;
                 }
 
-
                 const orderId =
                     data.substring(7);
-
 
                 const result =
                     rejectOrder(
                         orderId
                     );
-
 
                 if (
                     !result.success
@@ -2369,7 +2122,6 @@ bot.on(
                     return;
                 }
 
-
                 await bot.answerCallbackQuery(
 
                     query.id,
@@ -2378,7 +2130,6 @@ bot.on(
                         text: "Заказ отклонён ❌"
                     }
                 );
-
 
                 try {
 
@@ -2396,7 +2147,6 @@ bot.on(
 
                 } catch (_) {}
 
-
                 await bot.sendMessage(
 
                     result.userId,
@@ -2413,7 +2163,6 @@ bot.on(
                     mainMenu()
                 );
 
-
                 return;
             }
 
@@ -2423,7 +2172,6 @@ bot.on(
                 "CALLBACK ERROR:",
                 error
             );
-
 
             try {
 
@@ -2442,7 +2190,6 @@ bot.on(
     }
 );
 
-
 // ============================================================
 // RECEIPT
 // ============================================================
@@ -2455,7 +2202,6 @@ async function handleReceipt(msg) {
             getPendingOrder(
                 msg.from.id
             );
-
 
         if (!order) {
 
@@ -2473,7 +2219,6 @@ async function handleReceipt(msg) {
             return;
         }
 
-
         await bot.sendMessage(
 
             msg.chat.id,
@@ -2487,18 +2232,15 @@ async function handleReceipt(msg) {
             mainMenu()
         );
 
-
         const username =
             msg.from.username
                 ? `@${msg.from.username}`
                 : "нет";
 
-
         const tariff =
             TARIFFS[
                 order.tariff
             ];
-
 
         const adminText =
 
@@ -2521,7 +2263,6 @@ async function handleReceipt(msg) {
             "💳 Проверьте перевод " +
             "и выберите действие:";
 
-
         for (
             const adminId of ADMIN_IDS
         ) {
@@ -2541,7 +2282,6 @@ async function handleReceipt(msg) {
                         )
                     }
                 );
-
 
                 await bot.forwardMessage(
 
@@ -2572,7 +2312,6 @@ async function handleReceipt(msg) {
     }
 }
 
-
 // ============================================================
 // PHOTO
 // ============================================================
@@ -2582,7 +2321,6 @@ bot.on(
     handleReceipt
 );
 
-
 // ============================================================
 // DOCUMENT
 // ============================================================
@@ -2591,7 +2329,6 @@ bot.on(
     "document",
     handleReceipt
 );
-
 
 // ============================================================
 // POLLING ERROR
@@ -2608,7 +2345,6 @@ bot.on(
     }
 );
 
-
 // ============================================================
 // UNCAUGHT ERRORS
 // ============================================================
@@ -2624,7 +2360,6 @@ process.on(
     }
 );
 
-
 process.on(
     "unhandledRejection",
     error => {
@@ -2635,7 +2370,6 @@ process.on(
         );
     }
 );
-
 
 // ============================================================
 // LOG
@@ -2672,10 +2406,6 @@ console.log(
 console.log(
     "💳 CARD:",
     CARD_NUMBER
-);
-
-console.log(
-    "🔑 APP KEY = TELEGRAM USER ID"
 );
 
 console.log(
