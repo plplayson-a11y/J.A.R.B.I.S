@@ -1,7 +1,7 @@
 {
   "name": "jarbis-bot",
   "version": "1.0.0",
-  "description": "J.A.R.V.I.S Telegram subscription bot",
+  "description": "J.A.R.B.I.S Telegram subscription bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
