@@ -5,12 +5,17 @@ const fs = require("fs");
 
 // ============================================================
 // J.A.R.B.I.S — TELEGRAM SUBSCRIPTION BOT
-// БЕЗ РЕГИСТРАЦИИ
-// ВХОД = ПРОВЕРКА АКТИВНОЙ ПОДПИСКИ
-// ПОСЛЕ ОДОБРЕНИЯ ОПЛАТЫ ВЫДАЁТСЯ КЛЮЧ
+// ============================================================
+// Регистрация удалена.
+// SMTP не используется.
+// Вход = проверка активной подписки.
+// После подтверждения оплаты админом пользователь получает ключ.
 // ============================================================
 
-// ==================== НАСТРОЙКИ ====================
+
+// ============================================================
+// НАСТРОЙКИ
+// ============================================================
 
 const BOT_TOKEN = process.env.TELEGRAM_TOKEN;
 
@@ -19,26 +24,298 @@ const ADMIN_IDS = [
     8882462981
 ];
 
-// Поддержка
 const SUPPORT_APP = "@JARBIS_help";
 const SUPPORT_BOT = "@sakuraYTST";
 
-// Карта
 const CARD_NUMBER =
     process.env.CARD_NUMBER || "2200 1536 2364 5513";
 
 const CARD_HOLDER =
     process.env.CARD_HOLDER || "Получатель: Алексей М.";
 
-// ==================== ПРОВЕРКА TOKEN ====================
+
+// ============================================================
+// ПРОВЕРКА TOKEN
+// ============================================================
 
 if (!BOT_TOKEN) {
     console.error("❌ TELEGRAM_TOKEN не установлен!");
     process.exit(1);
 }
 
+
 // ============================================================
-// ТАРИФЫ
+// TELEGRAM BOT
+// ВАЖНО: этот блок должен быть ДО bot.on / bot.onText
+// ============================================================
+
+const bot = new TelegramBot(BOT_TOKEN, {
+    polling: true
+});
+
+
+// ============================================================
+// DATABASE
+// ============================================================
+
+const DB_FILE = fs.existsSync("/data")
+    ? "/data/subscriptions.db"
+    : "./subscriptions.db";
+
+const db = new Database(DB_FILE);
+
+db.pragma("journal_mode = WAL");
+
+
+// ============================================================
+// DATABASE INIT
+// ============================================================
+
+function columnExists(table, column) {
+
+    const columns = db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all();
+
+    return columns.some(
+        item => item.name === column
+    );
+}
+
+
+function addColumn(
+    table,
+    column,
+    definition
+) {
+
+    if (!columnExists(table, column)) {
+
+        db.exec(`
+            ALTER TABLE ${table}
+            ADD COLUMN ${column} ${definition}
+        `);
+    }
+}
+
+
+function initDb() {
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS users (
+
+            user_id INTEGER PRIMARY KEY,
+
+            username TEXT,
+
+            name TEXT,
+
+            email TEXT,
+
+            sub_until TEXT,
+
+            total_paid INTEGER DEFAULT 0,
+
+            app_key TEXT
+
+        );
+
+        CREATE TABLE IF NOT EXISTS payments (
+
+            order_id TEXT PRIMARY KEY,
+
+            user_id INTEGER NOT NULL,
+
+            tariff TEXT NOT NULL,
+
+            amount INTEGER NOT NULL,
+
+            status TEXT NOT NULL,
+
+            created_at TEXT NOT NULL,
+
+            paid_at TEXT,
+
+            name TEXT,
+
+            email TEXT
+
+        );
+
+        CREATE TABLE IF NOT EXISTS admins (
+
+            user_id INTEGER PRIMARY KEY,
+
+            online INTEGER DEFAULT 1,
+
+            offline_until TEXT
+
+        );
+    `);
+
+
+    // Совместимость со старой базой
+
+    addColumn(
+        "users",
+        "username",
+        "TEXT"
+    );
+
+    addColumn(
+        "users",
+        "name",
+        "TEXT"
+    );
+
+    addColumn(
+        "users",
+        "email",
+        "TEXT"
+    );
+
+    addColumn(
+        "users",
+        "sub_until",
+        "TEXT"
+    );
+
+    addColumn(
+        "users",
+        "total_paid",
+        "INTEGER DEFAULT 0"
+    );
+
+    addColumn(
+        "users",
+        "app_key",
+        "TEXT"
+    );
+
+
+    addColumn(
+        "payments",
+        "name",
+        "TEXT"
+    );
+
+    addColumn(
+        "payments",
+        "email",
+        "TEXT"
+    );
+
+
+    // Добавляем админов
+
+    for (const adminId of ADMIN_IDS) {
+
+        db.prepare(`
+            INSERT OR IGNORE INTO admins
+            (
+                user_id,
+                online,
+                offline_until
+            )
+            VALUES (?, 1, NULL)
+        `).run(adminId);
+    }
+}
+
+
+// ============================================================
+// USERS
+// ============================================================
+
+function upsertUser(
+    userId,
+    username = null
+) {
+
+    db.prepare(`
+        INSERT OR IGNORE INTO users
+        (
+            user_id,
+            username
+        )
+        VALUES (?, ?)
+    `).run(
+        userId,
+        username
+    );
+
+
+    if (username) {
+
+        db.prepare(`
+            UPDATE users
+            SET username = ?
+            WHERE user_id = ?
+        `).run(
+            username,
+            userId
+        );
+    }
+}
+
+
+function getUser(userId) {
+
+    return db.prepare(`
+        SELECT *
+        FROM users
+        WHERE user_id = ?
+    `).get(userId);
+}
+
+
+// ============================================================
+// APP KEY
+// ============================================================
+
+function generateAppKey() {
+
+    return crypto
+        .randomBytes(16)
+        .toString("hex")
+        .toUpperCase();
+}
+
+
+function getOrCreateAppKey(userId) {
+
+    const user =
+        getUser(userId);
+
+    if (
+        user &&
+        user.app_key
+    ) {
+
+        return user.app_key;
+    }
+
+
+    const key =
+        generateAppKey();
+
+
+    db.prepare(`
+        UPDATE users
+        SET app_key = ?
+        WHERE user_id = ?
+    `).run(
+        key,
+        userId
+    );
+
+
+    return key;
+}
+
+
+// ============================================================
+// TARIFFS
 // ============================================================
 
 const TARIFFS = {
@@ -78,229 +355,12 @@ const TARIFFS = {
         days: 36500,
         price: 5000
     }
+
 };
 
-// ============================================================
-// DATABASE
-// ============================================================
-
-const DB_FILE = fs.existsSync("/data")
-    ? "/data/subscriptions.db"
-    : "./subscriptions.db";
-
-const db = new Database(DB_FILE);
-
-db.pragma("journal_mode = WAL");
 
 // ============================================================
-// DATABASE HELPERS
-// ============================================================
-
-function columnExists(table, column) {
-
-    const columns = db
-        .prepare(`PRAGMA table_info(${table})`)
-        .all();
-
-    return columns.some(
-        item => item.name === column
-    );
-}
-
-function addColumn(
-    table,
-    column,
-    definition
-) {
-
-    if (!columnExists(table, column)) {
-
-        db.exec(
-            `ALTER TABLE ${table}
-             ADD COLUMN ${column} ${definition}`
-        );
-    }
-}
-
-// ============================================================
-// INIT DATABASE
-// ============================================================
-
-function initDb() {
-
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            name TEXT,
-            email TEXT,
-            sub_until TEXT,
-            total_paid INTEGER DEFAULT 0,
-            access_key TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS payments (
-            order_id TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            tariff TEXT NOT NULL,
-            amount INTEGER NOT NULL,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            paid_at TEXT,
-            name TEXT,
-            email TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS admins (
-            user_id INTEGER PRIMARY KEY,
-            online INTEGER DEFAULT 1,
-            offline_until TEXT
-        );
-    `);
-
-    // Совместимость со старой базой
-
-    addColumn(
-        "users",
-        "name",
-        "TEXT"
-    );
-
-    addColumn(
-        "users",
-        "email",
-        "TEXT"
-    );
-
-    addColumn(
-        "users",
-        "sub_until",
-        "TEXT"
-    );
-
-    addColumn(
-        "users",
-        "total_paid",
-        "INTEGER DEFAULT 0"
-    );
-
-    addColumn(
-        "users",
-        "access_key",
-        "TEXT"
-    );
-
-    addColumn(
-        "payments",
-        "name",
-        "TEXT"
-    );
-
-    addColumn(
-        "payments",
-        "email",
-        "TEXT"
-    );
-
-    // Администраторы
-
-    for (const adminId of ADMIN_IDS) {
-
-        db.prepare(`
-            INSERT OR IGNORE INTO admins
-            (
-                user_id,
-                online,
-                offline_until
-            )
-            VALUES (?, 1, NULL)
-        `).run(adminId);
-    }
-}
-
-// ============================================================
-// USERS
-// ============================================================
-
-function upsertUser(
-    userId,
-    username = null
-) {
-
-    db.prepare(`
-        INSERT OR IGNORE INTO users
-        (
-            user_id,
-            username
-        )
-        VALUES (?, ?)
-    `).run(
-        userId,
-        username
-    );
-
-    if (username) {
-
-        db.prepare(`
-            UPDATE users
-            SET username = ?
-            WHERE user_id = ?
-        `).run(
-            username,
-            userId
-        );
-    }
-}
-
-function getUser(userId) {
-
-    return db.prepare(`
-        SELECT *
-        FROM users
-        WHERE user_id = ?
-    `).get(userId);
-}
-
-// ============================================================
-// ACCESS KEY
-// ============================================================
-
-function generateAccessKey() {
-
-    return crypto
-        .randomBytes(16)
-        .toString("hex")
-        .toUpperCase();
-}
-
-function getOrCreateAccessKey(userId) {
-
-    const user = getUser(userId);
-
-    if (!user) {
-        return null;
-    }
-
-    if (user.access_key) {
-        return user.access_key;
-    }
-
-    const key = generateAccessKey();
-
-    db.prepare(`
-        UPDATE users
-        SET access_key = ?
-        WHERE user_id = ?
-    `).run(
-        key,
-        userId
-    );
-
-    return key;
-}
-
-// ============================================================
-// ADMINS
+// ADMIN
 // ============================================================
 
 function isAdmin(userId) {
@@ -310,15 +370,16 @@ function isAdmin(userId) {
     );
 }
 
+
 function getAdminStatus(userId) {
 
-    const row = db
-        .prepare(`
+    const row =
+        db.prepare(`
             SELECT *
             FROM admins
             WHERE user_id = ?
-        `)
-        .get(userId);
+        `).get(userId);
+
 
     if (!row) {
 
@@ -327,15 +388,21 @@ function getAdminStatus(userId) {
         };
     }
 
+
     if (
         row.online === 0 &&
         row.offline_until
     ) {
 
         const until =
-            new Date(row.offline_until);
+            new Date(
+                row.offline_until
+            );
 
-        if (until <= new Date()) {
+
+        if (
+            until <= new Date()
+        ) {
 
             db.prepare(`
                 UPDATE admins
@@ -345,17 +412,24 @@ function getAdminStatus(userId) {
                 WHERE user_id = ?
             `).run(userId);
 
+
             return {
                 online: true
             };
         }
     }
 
+
     return {
-        online: row.online === 1,
-        offlineUntil: row.offline_until
+
+        online:
+            row.online === 1,
+
+        offlineUntil:
+            row.offline_until
     };
 }
+
 
 function setAdminOnline(userId) {
 
@@ -367,6 +441,7 @@ function setAdminOnline(userId) {
         WHERE user_id = ?
     `).run(userId);
 }
+
 
 function setAdminOffline(
     userId,
@@ -385,6 +460,7 @@ function setAdminOffline(
     );
 }
 
+
 function getOnlineAdminsCount() {
 
     return ADMIN_IDS.filter(
@@ -392,6 +468,7 @@ function getOnlineAdminsCount() {
             getAdminStatus(id).online
     ).length;
 }
+
 
 function getStatusText() {
 
@@ -402,12 +479,14 @@ function getStatusText() {
         return "🟢 Администратор в онлайне";
     }
 
+
     return (
         "🔴 Администратор сейчас " +
         "не может одобрить заявку.\n" +
         "Пожалуйста, подождите."
     );
 }
+
 
 // ============================================================
 // ADMIN OFFLINE TIME
@@ -427,6 +506,7 @@ function parseOfflineTime(text) {
 
     let found = false;
 
+
     while (
         (match = regex.exec(value))
     ) {
@@ -439,28 +519,44 @@ function parseOfflineTime(text) {
         const unit =
             match[2];
 
-        if (unit === "d")
+
+        if (unit === "d") {
+
             totalSeconds +=
                 number * 86400;
+        }
 
-        if (unit === "h")
+
+        if (unit === "h") {
+
             totalSeconds +=
                 number * 3600;
+        }
 
-        if (unit === "m")
+
+        if (unit === "m") {
+
             totalSeconds +=
                 number * 60;
+        }
 
-        if (unit === "s")
+
+        if (unit === "s") {
+
             totalSeconds +=
                 number;
+        }
     }
 
+
     const cleaned =
-        value.replace(
-            /(\d+)\s*(d|h|m|s)/g,
-            ""
-        ).trim();
+        value
+            .replace(
+                /(\d+)\s*(d|h|m|s)/g,
+                ""
+            )
+            .trim();
+
 
     if (
         !found ||
@@ -471,6 +567,7 @@ function parseOfflineTime(text) {
         return null;
     }
 
+
     if (
         totalSeconds >
         15 * 86400
@@ -479,42 +576,75 @@ function parseOfflineTime(text) {
         return "MAX";
     }
 
+
     return totalSeconds;
 }
+
 
 function formatDuration(seconds) {
 
     const result = [];
 
+
     const days =
-        Math.floor(seconds / 86400);
+        Math.floor(
+            seconds / 86400
+        );
 
     seconds %= 86400;
 
+
     const hours =
-        Math.floor(seconds / 3600);
+        Math.floor(
+            seconds / 3600
+        );
 
     seconds %= 3600;
 
+
     const minutes =
-        Math.floor(seconds / 60);
+        Math.floor(
+            seconds / 60
+        );
 
     seconds %= 60;
 
-    if (days)
-        result.push(`${days}д`);
 
-    if (hours)
-        result.push(`${hours}ч`);
+    if (days) {
 
-    if (minutes)
-        result.push(`${minutes}мин`);
+        result.push(
+            `${days}д`
+        );
+    }
 
-    if (seconds)
-        result.push(`${seconds}сек`);
+
+    if (hours) {
+
+        result.push(
+            `${hours}ч`
+        );
+    }
+
+
+    if (minutes) {
+
+        result.push(
+            `${minutes}мин`
+        );
+    }
+
+
+    if (seconds) {
+
+        result.push(
+            `${seconds}сек`
+        );
+    }
+
 
     return result.join(" ");
 }
+
 
 // ============================================================
 // SUBSCRIPTION
@@ -522,7 +652,9 @@ function formatDuration(seconds) {
 
 function isSubActive(userId) {
 
-    const user = getUser(userId);
+    const user =
+        getUser(userId);
+
 
     if (
         !user ||
@@ -532,22 +664,31 @@ function isSubActive(userId) {
         return false;
     }
 
+
     return (
-        new Date(user.sub_until) >
-        new Date()
+        new Date(
+            user.sub_until
+        ) > new Date()
     );
 }
+
 
 function setSubscription(
     userId,
     days
 ) {
 
-    const user = getUser(userId);
+    const user =
+        getUser(userId);
 
-    const now = new Date();
 
-    let start = now;
+    const now =
+        new Date();
+
+
+    let start =
+        now;
+
 
     if (
         user &&
@@ -555,18 +696,27 @@ function setSubscription(
     ) {
 
         const current =
-            new Date(user.sub_until);
+            new Date(
+                user.sub_until
+            );
 
-        if (current > now) {
-            start = current;
+
+        if (
+            current > now
+        ) {
+
+            start =
+                current;
         }
     }
+
 
     const newUntil =
         new Date(
             start.getTime() +
             days * 86400000
         );
+
 
     db.prepare(`
         UPDATE users
@@ -577,8 +727,10 @@ function setSubscription(
         userId
     );
 
+
     return newUntil;
 }
+
 
 // ============================================================
 // ORDERS
@@ -594,6 +746,7 @@ function createOrder(
     const tariff =
         TARIFFS[tariffKey];
 
+
     if (!tariff) {
 
         throw new Error(
@@ -601,11 +754,13 @@ function createOrder(
         );
     }
 
+
     const orderId =
         crypto
             .randomBytes(5)
             .toString("hex")
             .toUpperCase();
+
 
     db.prepare(`
         INSERT INTO payments
@@ -621,18 +776,43 @@ function createOrder(
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
+
         orderId,
+
         userId,
+
         tariffKey,
+
         tariff.price,
+
         "pending",
+
         new Date().toISOString(),
+
         name,
+
         email
     );
 
+
+    // Сохраняем имя и email пользователя
+
+    db.prepare(`
+        UPDATE users
+        SET
+            name = ?,
+            email = ?
+        WHERE user_id = ?
+    `).run(
+        name,
+        email,
+        userId
+    );
+
+
     return orderId;
 }
+
 
 function getOrder(orderId) {
 
@@ -643,17 +823,20 @@ function getOrder(orderId) {
     `).get(orderId);
 }
 
+
 function getPendingOrder(userId) {
 
     return db.prepare(`
         SELECT *
         FROM payments
-        WHERE user_id = ?
-        AND status = 'pending'
+        WHERE
+            user_id = ?
+            AND status = 'pending'
         ORDER BY created_at DESC
         LIMIT 1
     `).get(userId);
 }
+
 
 // ============================================================
 // CONFIRM ORDER
@@ -664,6 +847,7 @@ function confirmOrder(orderId) {
     const order =
         getOrder(orderId);
 
+
     if (!order) {
 
         return {
@@ -671,6 +855,7 @@ function confirmOrder(orderId) {
             reason: "not_found"
         };
     }
+
 
     if (
         order.status !== "pending"
@@ -682,8 +867,10 @@ function confirmOrder(orderId) {
         };
     }
 
+
     const tariff =
         TARIFFS[order.tariff];
+
 
     if (!tariff) {
 
@@ -693,16 +880,19 @@ function confirmOrder(orderId) {
         };
     }
 
+
     const until =
         setSubscription(
             order.user_id,
             tariff.days
         );
 
-    const accessKey =
-        getOrCreateAccessKey(
+
+    const key =
+        getOrCreateAppKey(
             order.user_id
         );
+
 
     db.prepare(`
         UPDATE payments
@@ -717,6 +907,7 @@ function confirmOrder(orderId) {
         orderId
     );
 
+
     db.prepare(`
         UPDATE users
         SET total_paid =
@@ -727,6 +918,7 @@ function confirmOrder(orderId) {
         order.user_id
     );
 
+
     return {
 
         success: true,
@@ -736,11 +928,12 @@ function confirmOrder(orderId) {
 
         until,
 
-        accessKey,
+        key,
 
         order
     };
 }
+
 
 // ============================================================
 // REJECT ORDER
@@ -751,6 +944,7 @@ function rejectOrder(orderId) {
     const order =
         getOrder(orderId);
 
+
     if (!order) {
 
         return {
@@ -758,6 +952,7 @@ function rejectOrder(orderId) {
             reason: "not_found"
         };
     }
+
 
     if (
         order.status !== "pending"
@@ -769,6 +964,7 @@ function rejectOrder(orderId) {
         };
     }
 
+
     db.prepare(`
         UPDATE payments
         SET status = 'rejected'
@@ -776,6 +972,7 @@ function rejectOrder(orderId) {
             order_id = ?
             AND status = 'pending'
     `).run(orderId);
+
 
     return {
 
@@ -788,8 +985,20 @@ function rejectOrder(orderId) {
     };
 }
 
+
 // ============================================================
-// KEYBOARDS
+// EMAIL VALIDATION
+// ============================================================
+
+function validEmail(email) {
+
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        .test(email);
+}
+
+
+// ============================================================
+// MAIN MENU
 // ============================================================
 
 function mainMenu() {
@@ -802,27 +1011,32 @@ function mainMenu() {
 
                 [
                     {
-                        text: "💻 Войти"
+                        text:
+                            "🔐 Войти"
                     },
 
                     {
-                        text: "🛒 Купить"
+                        text:
+                            "🛒 Купить"
                     }
                 ],
 
                 [
                     {
-                        text: "📋 Моя подписка"
+                        text:
+                            "👤 Мой аккаунт"
                     },
 
                     {
-                        text: "ℹ️ О боте"
+                        text:
+                            "ℹ️ Помощь"
                     }
                 ],
 
                 [
                     {
-                        text: "🛠 Тех.поддержка"
+                        text:
+                            "🛠 Тех.поддержка"
                     }
                 ]
 
@@ -834,6 +1048,7 @@ function mainMenu() {
         }
     };
 }
+
 
 // ============================================================
 // BUY MENU
@@ -849,50 +1064,71 @@ function buyMenu() {
 
                 [
                     {
-                        text: "80 ₽ — 3 дня",
-                        callback_data: "buy_80"
+                        text:
+                            "80 ₽ — 3 дня",
+
+                        callback_data:
+                            "buy_80"
                     }
                 ],
 
                 [
                     {
-                        text: "350 ₽ — 1 месяц",
-                        callback_data: "buy_350"
+                        text:
+                            "350 ₽ — 1 месяц",
+
+                        callback_data:
+                            "buy_350"
                     }
                 ],
 
                 [
                     {
-                        text: "700 ₽ — 3 месяца",
-                        callback_data: "buy_700"
+                        text:
+                            "700 ₽ — 3 месяца",
+
+                        callback_data:
+                            "buy_700"
                     }
                 ],
 
                 [
                     {
-                        text: "1400 ₽ — 6 месяцев",
-                        callback_data: "buy_1400"
+                        text:
+                            "1400 ₽ — 6 месяцев",
+
+                        callback_data:
+                            "buy_1400"
                     }
                 ],
 
                 [
                     {
-                        text: "2800 ₽ — 1 год",
-                        callback_data: "buy_2800"
+                        text:
+                            "2800 ₽ — 1 год",
+
+                        callback_data:
+                            "buy_2800"
                     }
                 ],
 
                 [
                     {
-                        text: "5000 ₽ — навсегда",
-                        callback_data: "buy_5000"
+                        text:
+                            "5000 ₽ — навсегда",
+
+                        callback_data:
+                            "buy_5000"
                     }
                 ],
 
                 [
                     {
-                        text: "⬅️ Назад",
-                        callback_data: "back"
+                        text:
+                            "⬅️ Назад",
+
+                        callback_data:
+                            "back"
                     }
                 ]
 
@@ -900,6 +1136,7 @@ function buyMenu() {
         }
     };
 }
+
 
 // ============================================================
 // ADMIN MENU
@@ -915,22 +1152,31 @@ function adminMenu() {
 
                 [
                     {
-                        text: "🟢 Я онлайн",
-                        callback_data: "admin_online"
+                        text:
+                            "🟢 Я онлайн",
+
+                        callback_data:
+                            "admin_online"
                     }
                 ],
 
                 [
                     {
-                        text: "🔴 Я не онлайн",
-                        callback_data: "admin_offline"
+                        text:
+                            "🔴 Я не онлайн",
+
+                        callback_data:
+                            "admin_offline"
                     }
                 ],
 
                 [
                     {
-                        text: "⬅️ Назад",
-                        callback_data: "back"
+                        text:
+                            "⬅️ Главное меню",
+
+                        callback_data:
+                            "back"
                     }
                 ]
 
@@ -939,11 +1185,14 @@ function adminMenu() {
     };
 }
 
+
 // ============================================================
-// ORDER BUTTONS
+// ADMIN ORDER BUTTONS
 // ============================================================
 
-function adminOrderButtons(orderId) {
+function adminOrderButtons(
+    orderId
+) {
 
     return {
 
@@ -954,13 +1203,17 @@ function adminOrderButtons(orderId) {
                 [
 
                     {
-                        text: "✅ Подтвердить",
+                        text:
+                            "✅ Подтвердить",
+
                         callback_data:
                             `confirm_${orderId}`
                     },
 
                     {
-                        text: "❌ Отклонить",
+                        text:
+                            "❌ Отклонить",
+
                         callback_data:
                             `reject_${orderId}`
                     }
@@ -972,13 +1225,17 @@ function adminOrderButtons(orderId) {
     };
 }
 
+
 // ============================================================
 // STATES
 // ============================================================
 
-const userStates = new Map();
+const userStates =
+    new Map();
 
-const adminWaitingTime = new Set();
+const adminWaitingTime =
+    new Set();
+
 
 // ============================================================
 // /START
@@ -990,10 +1247,15 @@ bot.onText(
 
         try {
 
+            const userId =
+                msg.from.id;
+
+
             upsertUser(
-                msg.from.id,
+                userId,
                 msg.from.username || null
             );
+
 
             await bot.sendMessage(
 
@@ -1002,21 +1264,22 @@ bot.onText(
                 "👋 Добро пожаловать " +
                 "в J.A.R.B.I.S!\n\n" +
 
-                "🚀 Приложение для доступа " +
-                "по активной подписке.\n\n" +
+                "🔐 Войдите в приложение " +
+                "после покупки подписки.\n\n" +
 
-                "💻 «Войти» — получить доступ " +
-                "при наличии активной подписки.\n\n" +
+                "🛒 Выберите тариф и оплатите заказ.\n" +
 
-                "🛒 «Купить» — оформить подписку.\n\n" +
+                "👤 После подтверждения оплаты " +
+                "вы получите ключ для приложения.\n\n" +
 
                 getStatusText(),
 
                 mainMenu()
             );
 
+
             if (
-                isAdmin(msg.from.id)
+                isAdmin(userId)
             ) {
 
                 await bot.sendMessage(
@@ -1042,6 +1305,7 @@ bot.onText(
     }
 );
 
+
 // ============================================================
 // /ID
 // ============================================================
@@ -1060,6 +1324,7 @@ bot.onText(
     }
 );
 
+
 // ============================================================
 // /ADMIN
 // ============================================================
@@ -1069,10 +1334,14 @@ bot.onText(
     async msg => {
 
         if (
-            !isAdmin(msg.from.id)
+            !isAdmin(
+                msg.from.id
+            )
         ) {
+
             return;
         }
+
 
         await bot.sendMessage(
 
@@ -1088,6 +1357,7 @@ bot.onText(
     }
 );
 
+
 // ============================================================
 // TEXT
 // ============================================================
@@ -1098,23 +1368,29 @@ bot.on(
 
         try {
 
-            if (!msg.text)
+            if (!msg.text) {
+
                 return;
+            }
+
 
             const text =
                 msg.text.trim();
 
+
             const userId =
                 msg.from.id;
+
 
             upsertUser(
                 userId,
                 msg.from.username || null
             );
 
-            // ==========================================
+
+            // ==================================================
             // ADMIN OFFLINE TIME
-            // ==========================================
+            // ==================================================
 
             if (
                 isAdmin(userId) &&
@@ -1124,7 +1400,10 @@ bot.on(
                 const seconds =
                     parseOfflineTime(text);
 
-                if (seconds === "MAX") {
+
+                if (
+                    seconds === "MAX"
+                ) {
 
                     await bot.sendMessage(
 
@@ -1143,7 +1422,10 @@ bot.on(
                     return;
                 }
 
-                if (seconds === null) {
+
+                if (
+                    seconds === null
+                ) {
 
                     await bot.sendMessage(
 
@@ -1162,20 +1444,24 @@ bot.on(
                     return;
                 }
 
+
                 const until =
                     new Date(
                         Date.now() +
                         seconds * 1000
                     );
 
+
                 setAdminOffline(
                     userId,
                     until
                 );
 
+
                 adminWaitingTime.delete(
                     userId
                 );
+
 
                 await bot.sendMessage(
 
@@ -1187,17 +1473,22 @@ bot.on(
                     `${formatDuration(seconds)}\n` +
 
                     `🕐 До: ` +
-                    `${until.toLocaleString("ru-RU")}`,
+                    `${until.toLocaleString("ru-RU")}\n\n` +
+
+                    "Когда вернётесь, " +
+                    "нажмите «🟢 Я онлайн».",
 
                     adminMenu()
                 );
 
+
                 return;
             }
 
-            // ==========================================
+
+            // ==================================================
             // ADMIN ONLINE
-            // ==========================================
+            // ==================================================
 
             if (
                 isAdmin(userId) &&
@@ -1205,6 +1496,7 @@ bot.on(
             ) {
 
                 setAdminOnline(userId);
+
 
                 await bot.sendMessage(
 
@@ -1216,19 +1508,24 @@ bot.on(
                     adminMenu()
                 );
 
+
                 return;
             }
 
-            // ==========================================
+
+            // ==================================================
             // ADMIN OFFLINE
-            // ==========================================
+            // ==================================================
 
             if (
                 isAdmin(userId) &&
                 text === "🔴 Я не онлайн"
             ) {
 
-                adminWaitingTime.add(userId);
+                adminWaitingTime.add(
+                    userId
+                );
+
 
                 await bot.sendMessage(
 
@@ -1245,22 +1542,20 @@ bot.on(
                     "⚠️ Максимум — 15 дней."
                 );
 
+
                 return;
             }
 
-            // ==========================================
-            // ВОЙТИ
-            // ==========================================
+
+            // ==================================================
+            // LOGIN
+            // ==================================================
 
             if (
-                text === "💻 Войти"
+                text === "🔐 Войти"
             ) {
 
-                const user =
-                    getUser(userId);
-
                 if (
-                    !user ||
                     !isSubActive(userId)
                 ) {
 
@@ -1268,30 +1563,27 @@ bot.on(
 
                         msg.chat.id,
 
-                        "❌ Вход недоступен.\n\n" +
+                        "❌ Вход запрещён.\n\n" +
 
-                        "Активная подписка не найдена.\n\n" +
+                        "У вас нет активной подписки.\n\n" +
 
-                        "Нажмите «🛒 Купить», " +
-                        "чтобы оформить подписку.",
+                        "🛒 Купите подписку, " +
+                        "после чего администратор " +
+                        "подтвердит оплату.",
 
                         mainMenu()
                     );
 
+
                     return;
                 }
 
+
                 const key =
-                    getOrCreateAccessKey(
+                    getOrCreateAppKey(
                         userId
                     );
 
-                const until =
-                    new Date(
-                        user.sub_until
-                    ).toLocaleString(
-                        "ru-RU"
-                    );
 
                 await bot.sendMessage(
 
@@ -1303,90 +1595,26 @@ bot.on(
 
                     `\`${key}\`\n\n` +
 
-                    "📱 Откройте приложение J.A.R.B.I.S\n" +
+                    "📱 Откройте приложение " +
+                    "J.A.R.B.I.S\n" +
 
-                    "и введите этот ключ для входа.\n\n" +
-
-                    `📅 Подписка до: ${until}`,
+                    "и введите этот ключ " +
+                    "для входа.",
 
                     {
-                        parse_mode: "Markdown"
+                        parse_mode:
+                            "Markdown"
                     }
                 );
+
 
                 return;
             }
 
-            // ==========================================
-            // МОЯ ПОДПИСКА
-            // ==========================================
 
-            if (
-                text === "📋 Моя подписка"
-            ) {
-
-                const user =
-                    getUser(userId);
-
-                if (
-                    !user ||
-                    !isSubActive(userId)
-                ) {
-
-                    await bot.sendMessage(
-
-                        msg.chat.id,
-
-                        "📋 Моя подписка\n\n" +
-
-                        "❌ Активной подписки нет.\n\n" +
-
-                        "Нажмите «🛒 Купить», " +
-                        "чтобы оформить подписку.",
-
-                        mainMenu()
-                    );
-
-                    return;
-                }
-
-                const until =
-                    new Date(
-                        user.sub_until
-                    ).toLocaleString(
-                        "ru-RU"
-                    );
-
-                const key =
-                    getOrCreateAccessKey(
-                        userId
-                    );
-
-                await bot.sendMessage(
-
-                    msg.chat.id,
-
-                    "📋 Моя подписка\n\n" +
-
-                    "✅ Подписка активна.\n\n" +
-
-                    `📅 До: ${until}\n\n` +
-
-                    "🔑 Ваш ключ:\n" +
-
-                    `\`${key}\``,
-
-                    {
-                        parse_mode: "Markdown"
-                    }
-                );
-
-                return;
-            }
-
-            // ==========================================
-            // КУПИТЬ
-            // ==========================================
+            // ==================================================
+            // BUY
+            // ==================================================
 
             if (
                 text === "🛒 Купить"
@@ -1401,48 +1629,14 @@ bot.on(
                     buyMenu()
                 );
 
-                return;
-            }
-
-            // ==========================================
-            // О БОТЕ
-            // ==========================================
-
-            if (
-                text === "ℹ️ О боте"
-            ) {
-
-                await bot.sendMessage(
-
-                    msg.chat.id,
-
-                    "ℹ️ J.A.R.B.I.S\n\n" +
-
-                    "🤖 Бот используется для " +
-                    "оформления и управления " +
-                    "подпиской.\n\n" +
-
-                    "🛒 Выберите тариф и оформите заказ.\n\n" +
-
-                    "📷 После оплаты отправьте чек.\n\n" +
-
-                    "👨‍💼 Администратор проверит оплату.\n\n" +
-
-                    "💻 После подтверждения " +
-                    "нажмите «💻 Войти» и получите ключ.\n\n" +
-
-                    "🛠 По вопросам обращайтесь " +
-                    "в техническую поддержку.",
-
-                    mainMenu()
-                );
 
                 return;
             }
 
-            // ==========================================
-            // ПОДДЕРЖКА
-            // ==========================================
+
+            // ==================================================
+            // SUPPORT
+            // ==================================================
 
             if (
                 text === "🛠 Тех.поддержка"
@@ -1454,192 +1648,299 @@ bot.on(
 
                     "🛠 Тех.поддержка\n\n" +
 
-                    `По приложению: ${SUPPORT_APP}\n\n` +
+                    "Тех.поддержка По\n" +
+                    `приложению: ${SUPPORT_APP}\n\n` +
 
-                    `По боту: ${SUPPORT_BOT}`,
+                    "Тех.поддержка по\n" +
+                    `боту: ${SUPPORT_BOT}`,
 
                     mainMenu()
                 );
 
+
                 return;
             }
 
-            // ==========================================
+
+            // ==================================================
+            // HELP
+            // ==================================================
+
+            if (
+                text === "ℹ️ Помощь"
+            ) {
+
+                await bot.sendMessage(
+
+                    msg.chat.id,
+
+                    "ℹ️ Помощь\n\n" +
+
+                    "🔐 Войти — проверить " +
+                    "активную подписку и получить " +
+                    "ключ приложения.\n\n" +
+
+                    "🛒 Купить — выбрать тариф.\n\n" +
+
+                    "👤 Мой аккаунт — информация " +
+                    "о вашем аккаунте.\n\n" +
+
+                    "🛠 Тех.поддержка — контакты поддержки.\n\n" +
+
+                    "💳 Реквизиты для оплаты:\n" +
+                    `${CARD_NUMBER}\n` +
+                    `${CARD_HOLDER}`,
+
+                    mainMenu()
+                );
+
+
+                return;
+            }
+
+
+            // ==================================================
+            // MY ACCOUNT
+            // ==================================================
+
+            if (
+                text === "👤 Мой аккаунт"
+            ) {
+
+                const user =
+                    getUser(userId);
+
+
+                let subscription =
+                    "❌ Активной подписки нет.";
+
+
+                if (
+                    isSubActive(userId)
+                ) {
+
+                    subscription =
+                        "✅ Подписка активна.\n\n" +
+                        `📅 До: ${
+                            new Date(
+                                user.sub_until
+                            ).toLocaleString(
+                                "ru-RU"
+                            )
+                        }`;
+                }
+
+
+                await bot.sendMessage(
+
+                    msg.chat.id,
+
+                    "👤 Мой аккаунт\n\n" +
+
+                    `🆔 Telegram ID: ${userId}\n` +
+
+                    `👤 Username: ${
+                        msg.from.username
+                            ? "@" + msg.from.username
+                            : "не указан"
+                    }\n\n` +
+
+                    subscription,
+
+                    mainMenu()
+                );
+
+
+                return;
+            }
+
+
+            // ==================================================
             // BUY STATE
-            // ==========================================
+            // ==================================================
 
             const state =
                 userStates.get(userId);
 
-            if (!state)
+
+            if (!state) {
+
                 return;
+            }
+
+
+            // ==================================================
+            // BUY NAME
+            // ==================================================
 
             if (
-                state.type === "buy"
+                state.type === "buy" &&
+                state.step === "name"
             ) {
 
-                // ======================================
-                // NAME
-                // ======================================
-
                 if (
-                    state.step === "name"
+                    text.length < 2 ||
+                    text.length > 100
                 ) {
-
-                    if (
-                        text.length < 2 ||
-                        text.length > 100
-                    ) {
-
-                        await bot.sendMessage(
-
-                            msg.chat.id,
-
-                            "❌ Имя должно " +
-                            "содержать от 2 до 100 символов."
-                        );
-
-                        return;
-                    }
-
-                    state.name = text;
-
-                    state.step = "email";
-
-                    userStates.set(
-                        userId,
-                        state
-                    );
 
                     await bot.sendMessage(
 
                         msg.chat.id,
 
-                        "📧 Введите вашу почту:\n\n" +
-
-                        "Например:\n" +
-                        "example@gmail.com"
+                        "❌ Имя должно содержать " +
+                        "от 2 до 100 символов."
                     );
 
                     return;
                 }
 
-                // ======================================
-                // EMAIL
-                // ======================================
+
+                state.name =
+                    text;
+
+                state.step =
+                    "email";
+
+
+                userStates.set(
+                    userId,
+                    state
+                );
+
+
+                await bot.sendMessage(
+
+                    msg.chat.id,
+
+                    "📧 Введите вашу почту:\n\n" +
+                    "Например:\n" +
+                    "example@gmail.com"
+                );
+
+
+                return;
+            }
+
+
+            // ==================================================
+            // BUY EMAIL
+            // ==================================================
+
+            if (
+                state.type === "buy" &&
+                state.step === "email"
+            ) {
+
+                const email =
+                    text.toLowerCase().trim();
+
 
                 if (
-                    state.step === "email"
+                    !validEmail(email)
                 ) {
-
-                    const email =
-                        text.toLowerCase();
-
-                    if (
-                        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/
-                            .test(email)
-                    ) {
-
-                        await bot.sendMessage(
-
-                            msg.chat.id,
-
-                            "❌ Неверный формат почты.\n\n" +
-
-                            "Введите например:\n" +
-                            "example@gmail.com"
-                        );
-
-                        return;
-                    }
-
-                    const tariff =
-                        TARIFFS[
-                            state.tariffKey
-                        ];
-
-                    const orderId =
-                        createOrder(
-
-                            userId,
-
-                            state.tariffKey,
-
-                            state.name,
-
-                            email
-                        );
-
-                    userStates.delete(
-                        userId
-                    );
 
                     await bot.sendMessage(
 
                         msg.chat.id,
 
-                        "🧾 ЗАКАЗ СОЗДАН\n\n" +
+                        "❌ Неверный формат почты.\n\n" +
+                        "Введите email ещё раз:"
+                    );
 
-                        `№ Заказа: ` +
-                        `\`${orderId}\`\n\n` +
+                    return;
+                }
 
-                        `👤 Имя: ${state.name}\n` +
 
-                        `📧 Почта: ${email}\n\n` +
+                const tariff =
+                    TARIFFS[
+                        state.tariffKey
+                    ];
 
-                        `📦 Тариф: ${tariff.name}\n` +
 
-                        `💰 Сумма: ${tariff.price} ₽\n\n` +
+                const orderId =
+                    createOrder(
 
-                        "💳 Реквизиты для оплаты:\n\n" +
+                        userId,
 
-                        `💳 Карта: \`${CARD_NUMBER}\`\n` +
+                        state.tariffKey,
 
-                        `${CARD_HOLDER}\n\n` +
+                        state.name,
 
-                        "⚠️ Обязательно сохраните " +
-                        "номер заказа.\n\n" +
+                        email
+                    );
 
-                        `🧾 Заказ: \`${orderId}\`\n\n` +
 
-                        "После оплаты нажмите " +
-                        "«📷 Я оплатил» и отправьте чек.",
+                userStates.delete(
+                    userId
+                );
 
-                        {
 
-                            parse_mode: "Markdown",
+                await bot.sendMessage(
 
-                            reply_markup: {
+                    msg.chat.id,
 
-                                inline_keyboard: [
+                    "🧾 ЗАКАЗ СОЗДАН\n\n" +
 
-                                    [
-                                        {
-                                            text:
-                                                "📷 Я оплатил",
+                    `№ Заказа: ` +
+                    `\`${orderId}\`\n\n` +
 
-                                            callback_data:
-                                                `paid_${orderId}`
-                                        }
-                                    ],
+                    `👤 Имя: ${state.name}\n` +
 
-                                    [
-                                        {
-                                            text:
-                                                "⬅️ Назад",
+                    `📧 Почта: ${email}\n\n` +
 
-                                            callback_data:
-                                                "back"
-                                        }
-                                    ]
+                    `📦 Тариф: ${tariff.name}\n` +
+
+                    `💰 Сумма: ${tariff.price} ₽\n\n` +
+
+                    "💳 Реквизиты для оплаты:\n\n" +
+
+                    `Карта:\n\`${CARD_NUMBER}\`\n\n` +
+
+                    `${CARD_HOLDER}\n\n` +
+
+                    "⚠️ После оплаты нажмите " +
+                    "«📷 Я оплатил» и отправьте чек.",
+
+                    {
+
+                        parse_mode:
+                            "Markdown",
+
+                        reply_markup: {
+
+                            inline_keyboard: [
+
+                                [
+
+                                    {
+                                        text:
+                                            "📷 Я оплатил",
+
+                                        callback_data:
+                                            `paid_${orderId}`
+                                    }
+
+                                ],
+
+                                [
+
+                                    {
+                                        text:
+                                            "⬅️ Назад",
+
+                                        callback_data:
+                                            "back"
+                                    }
 
                                 ]
-                            }
-                        }
-                    );
 
-                    return;
-                }
+                            ]
+                        }
+                    }
+                );
+
+
+                return;
             }
 
         } catch (error) {
@@ -1652,8 +1953,9 @@ bot.on(
     }
 );
 
+
 // ============================================================
-// CALLBACKS
+// CALLBACK QUERY
 // ============================================================
 
 bot.on(
@@ -1665,47 +1967,59 @@ bot.on(
             const data =
                 query.data;
 
+
             const chatId =
                 query.message.chat.id;
+
 
             const messageId =
                 query.message.message_id;
 
+
             const userId =
                 query.from.id;
 
-            // ==========================================
+
+            // ==================================================
             // BACK
-            // ==========================================
+            // ==================================================
 
             if (
                 data === "back"
             ) {
 
-                userStates.delete(userId);
-                adminWaitingTime.delete(userId);
+                userStates.delete(
+                    userId
+                );
+
+                adminWaitingTime.delete(
+                    userId
+                );
+
 
                 await bot.answerCallbackQuery(
                     query.id
                 );
+
 
                 await bot.sendMessage(
 
                     chatId,
 
                     "📋 Главное меню\n\n" +
-
                     "Выберите действие:",
 
                     mainMenu()
                 );
 
+
                 return;
             }
 
-            // ==========================================
+
+            // ==================================================
             // ADMIN ONLINE
-            // ==========================================
+            // ==================================================
 
             if (
                 data === "admin_online"
@@ -1723,14 +2037,17 @@ bot.on(
                             text:
                                 "Нет доступа",
 
-                            show_alert: true
+                            show_alert:
+                                true
                         }
                     );
 
                     return;
                 }
 
+
                 setAdminOnline(userId);
+
 
                 await bot.answerCallbackQuery(
 
@@ -1742,6 +2059,7 @@ bot.on(
                     }
                 );
 
+
                 await bot.sendMessage(
 
                     chatId,
@@ -1752,12 +2070,14 @@ bot.on(
                     adminMenu()
                 );
 
+
                 return;
             }
 
-            // ==========================================
+
+            // ==================================================
             // ADMIN OFFLINE
-            // ==========================================
+            // ==================================================
 
             if (
                 data === "admin_offline"
@@ -1775,18 +2095,24 @@ bot.on(
                             text:
                                 "Нет доступа",
 
-                            show_alert: true
+                            show_alert:
+                                true
                         }
                     );
 
                     return;
                 }
 
-                adminWaitingTime.add(userId);
+
+                adminWaitingTime.add(
+                    userId
+                );
+
 
                 await bot.answerCallbackQuery(
                     query.id
                 );
+
 
                 await bot.sendMessage(
 
@@ -1800,18 +2126,17 @@ bot.on(
                     "5s\n" +
                     "5d\n\n" +
 
-                    "Можно:\n" +
-                    "2d 5h 30m\n\n" +
-
                     "⚠️ Максимум — 15 дней."
                 );
+
 
                 return;
             }
 
-            // ==========================================
+
+            // ==================================================
             // BUY
-            // ==========================================
+            // ==================================================
 
             if (
                 data.startsWith("buy_")
@@ -1820,37 +2145,52 @@ bot.on(
                 const tariffKey =
                     data.substring(4);
 
+
                 const tariff =
                     TARIFFS[tariffKey];
+
 
                 if (!tariff) {
 
                     await bot.answerCallbackQuery(
-                        query.id
+
+                        query.id,
+
+                        {
+                            text:
+                                "Тариф не найден",
+
+                            show_alert:
+                                true
+                        }
                     );
 
                     return;
                 }
 
-                upsertUser(
-                    userId,
-                    query.from.username || null
-                );
 
                 userStates.set(
 
                     userId,
 
                     {
-                        type: "buy",
-                        step: "name",
-                        tariffKey
+
+                        type:
+                            "buy",
+
+                        step:
+                            "name",
+
+                        tariffKey:
+                            tariffKey
                     }
                 );
+
 
                 await bot.answerCallbackQuery(
                     query.id
                 );
+
 
                 await bot.sendMessage(
 
@@ -1863,12 +2203,108 @@ bot.on(
                     "👤 Введите ваше имя:"
                 );
 
+
                 return;
             }
 
-            // ==========================================
+
+            // ==================================================
+            // PAID
+            // ==================================================
+
+            if (
+                data.startsWith("paid_")
+            ) {
+
+                const orderId =
+                    data.substring(5);
+
+
+                const order =
+                    getOrder(orderId);
+
+
+                if (!order) {
+
+                    await bot.answerCallbackQuery(
+
+                        query.id,
+
+                        {
+                            text:
+                                "Заказ не найден",
+
+                            show_alert:
+                                true
+                        }
+                    );
+
+                    return;
+                }
+
+
+                if (
+                    order.user_id !== userId
+                ) {
+
+                    await bot.answerCallbackQuery(
+
+                        query.id,
+
+                        {
+                            text:
+                                "Этот заказ принадлежит другому пользователю",
+
+                            show_alert:
+                                true
+                        }
+                    );
+
+                    return;
+                }
+
+
+                await bot.answerCallbackQuery(
+                    query.id
+                );
+
+
+                await bot.sendMessage(
+
+                    chatId,
+
+                    "📷 Отправьте чек оплаты.\n\n" +
+
+                    `🧾 Заказ: ` +
+                    `\`${order.order_id}\`\n\n` +
+
+                    `👤 Имя: ${order.name}\n` +
+
+                    `📧 Почта: ${order.email}\n\n` +
+
+                    `📦 Тариф: ${
+                        TARIFFS[
+                            order.tariff
+                        ].name
+                    }\n\n` +
+
+                    "После отправки чек будет " +
+                    "передан администратору.",
+
+                    {
+                        parse_mode:
+                            "Markdown"
+                    }
+                );
+
+
+                return;
+            }
+
+
+            // ==================================================
             // CONFIRM
-            // ==========================================
+            // ==================================================
 
             if (
                 data.startsWith("confirm_")
@@ -1886,18 +2322,24 @@ bot.on(
                             text:
                                 "Нет доступа",
 
-                            show_alert: true
+                            show_alert:
+                                true
                         }
                     );
 
                     return;
                 }
 
+
                 const orderId =
                     data.substring(8);
 
+
                 const result =
-                    confirmOrder(orderId);
+                    confirmOrder(
+                        orderId
+                    );
+
 
                 if (
                     !result.success
@@ -1914,12 +2356,14 @@ bot.on(
                                     ? "Заказ уже обработан"
                                     : "Заказ не найден",
 
-                            show_alert: true
+                            show_alert:
+                                true
                         }
                     );
 
                     return;
                 }
+
 
                 await bot.answerCallbackQuery(
 
@@ -1931,21 +2375,27 @@ bot.on(
                     }
                 );
 
+
                 try {
 
                     await bot.editMessageReplyMarkup(
 
                         {
-                            inline_keyboard: []
+                            inline_keyboard:
+                                []
                         },
 
                         {
-                            chat_id: chatId,
-                            message_id: messageId
+                            chat_id:
+                                chatId,
+
+                            message_id:
+                                messageId
                         }
                     );
 
                 } catch (_) {}
+
 
                 await bot.sendMessage(
 
@@ -1957,10 +2407,11 @@ bot.on(
 
                     `📧 Почта: ${result.order.email}\n\n` +
 
-                    `📦 Тариф: ` +
-                    `${TARIFFS[
-                        result.order.tariff
-                    ].name}\n\n` +
+                    `📦 Тариф: ${
+                        TARIFFS[
+                            result.order.tariff
+                        ].name
+                    }\n\n` +
 
                     "📅 Подписка до:\n" +
 
@@ -1970,24 +2421,26 @@ bot.on(
 
                     "🔑 Ваш ключ:\n" +
 
-                    `\`${result.accessKey}\`\n\n` +
+                    `\`${result.key}\`\n\n` +
 
-                    "💻 Откройте приложение J.A.R.B.I.S\n" +
+                    "📱 Откройте приложение J.A.R.B.I.S\n" +
 
                     "и введите этот ключ для входа.",
 
                     {
-                        parse_mode: "Markdown",
-                        ...mainMenu()
+                        parse_mode:
+                            "Markdown"
                     }
                 );
+
 
                 return;
             }
 
-            // ==========================================
+
+            // ==================================================
             // REJECT
-            // ==========================================
+            // ==================================================
 
             if (
                 data.startsWith("reject_")
@@ -2005,18 +2458,24 @@ bot.on(
                             text:
                                 "Нет доступа",
 
-                            show_alert: true
+                            show_alert:
+                                true
                         }
                     );
 
                     return;
                 }
 
+
                 const orderId =
                     data.substring(7);
 
+
                 const result =
-                    rejectOrder(orderId);
+                    rejectOrder(
+                        orderId
+                    );
+
 
                 if (
                     !result.success
@@ -2030,12 +2489,14 @@ bot.on(
                             text:
                                 "Заказ уже обработан",
 
-                            show_alert: true
+                            show_alert:
+                                true
                         }
                     );
 
                     return;
                 }
+
 
                 await bot.answerCallbackQuery(
 
@@ -2047,21 +2508,27 @@ bot.on(
                     }
                 );
 
+
                 try {
 
                     await bot.editMessageReplyMarkup(
 
                         {
-                            inline_keyboard: []
+                            inline_keyboard:
+                                []
                         },
 
                         {
-                            chat_id: chatId,
-                            message_id: messageId
+                            chat_id:
+                                chatId,
+
+                            message_id:
+                                messageId
                         }
                     );
 
                 } catch (_) {}
+
 
                 await bot.sendMessage(
 
@@ -2070,115 +2537,14 @@ bot.on(
                     "❌ Ваша оплата " +
                     "не была подтверждена.\n\n" +
 
-                    "Если вы действительно оплатили заказ, " +
+                    "Если вы уверены, что оплатили, " +
                     "обратитесь в поддержку:\n\n" +
 
-                    `По приложению: ${SUPPORT_APP}\n` +
-                    `По боту: ${SUPPORT_BOT}`,
+                    `Приложение: ${SUPPORT_APP}\n` +
 
-                    mainMenu()
+                    `Бот: ${SUPPORT_BOT}`
                 );
 
-                return;
-            }
-
-            // ==========================================
-            // PAID
-            // ==========================================
-
-            if (
-                data.startsWith("paid_")
-            ) {
-
-                const orderId =
-                    data.substring(5);
-
-                const order =
-                    getOrder(orderId);
-
-                if (!order) {
-
-                    await bot.answerCallbackQuery(
-
-                        query.id,
-
-                        {
-                            text:
-                                "Заказ не найден",
-
-                            show_alert: true
-                        }
-                    );
-
-                    return;
-                }
-
-                if (
-                    order.user_id !== userId
-                ) {
-
-                    await bot.answerCallbackQuery(
-
-                        query.id,
-
-                        {
-                            text:
-                                "Этот заказ принадлежит другому пользователю",
-
-                            show_alert: true
-                        }
-                    );
-
-                    return;
-                }
-
-                if (
-                    order.status !== "pending"
-                ) {
-
-                    await bot.answerCallbackQuery(
-
-                        query.id,
-
-                        {
-                            text:
-                                "Этот заказ уже обработан",
-
-                            show_alert: true
-                        }
-                    );
-
-                    return;
-                }
-
-                await bot.answerCallbackQuery(
-                    query.id
-                );
-
-                await bot.sendMessage(
-
-                    chatId,
-
-                    "📷 Отправьте чек оплаты.\n\n" +
-
-                    `🧾 Заказ: \`${orderId}\`\n\n` +
-
-                    `👤 Имя: ${order.name}\n` +
-
-                    `📧 Почта: ${order.email}\n\n` +
-
-                    `📦 Тариф: ` +
-                    `${TARIFFS[
-                        order.tariff
-                    ].name}\n\n` +
-
-                    "Можно отправить фотографию " +
-                    "или файл чека.",
-
-                    {
-                        parse_mode: "Markdown"
-                    }
-                );
 
                 return;
             }
@@ -2190,6 +2556,7 @@ bot.on(
                 error
             );
 
+
             try {
 
                 await bot.answerCallbackQuery(
@@ -2200,7 +2567,8 @@ bot.on(
                         text:
                             "Произошла ошибка",
 
-                        show_alert: true
+                        show_alert:
+                            true
                     }
                 );
 
@@ -2208,6 +2576,7 @@ bot.on(
         }
     }
 );
+
 
 // ============================================================
 // RECEIPT
@@ -2222,6 +2591,7 @@ async function handleReceipt(msg) {
                 msg.from.id
             );
 
+
         if (!order) {
 
             await bot.sendMessage(
@@ -2229,13 +2599,12 @@ async function handleReceipt(msg) {
                 msg.chat.id,
 
                 "❌ У вас нет ожидающего заказа.\n\n" +
-                "Сначала создайте заказ через «🛒 Купить».",
-
-                mainMenu()
+                "Сначала создайте заказ через «🛒 Купить»."
             );
 
             return;
         }
+
 
         await bot.sendMessage(
 
@@ -2248,10 +2617,12 @@ async function handleReceipt(msg) {
             "Ожидайте проверки администратора."
         );
 
+
         const username =
             msg.from.username
                 ? `@${msg.from.username}`
                 : "нет";
+
 
         const adminText =
 
@@ -2268,15 +2639,21 @@ async function handleReceipt(msg) {
 
             `👤 Username: ${username}\n\n` +
 
-            `📦 Тариф: ` +
-            `${TARIFFS[
-                order.tariff
-            ].name}\n` +
+            `📦 Тариф: ${
+                TARIFFS[
+                    order.tariff
+                ].name
+            }\n` +
 
-            `💰 Сумма: ${order.amount} ₽`;
+            `💰 Сумма: ${order.amount} ₽\n\n` +
+
+            "💳 Проверьте перевод " +
+            "и выберите действие:";
+
 
         for (
-            const adminId of ADMIN_IDS
+            const adminId
+            of ADMIN_IDS
         ) {
 
             try {
@@ -2288,11 +2665,17 @@ async function handleReceipt(msg) {
                     adminText,
 
                     {
-                        parse_mode: "Markdown"
+                        parse_mode:
+                            "Markdown",
+
+                        ...adminOrderButtons(
+                            order.order_id
+                        )
                     }
                 );
 
-                // Пересылаем сам чек
+
+                // Пересылаем чек
 
                 await bot.forwardMessage(
 
@@ -2303,29 +2686,11 @@ async function handleReceipt(msg) {
                     msg.message_id
                 );
 
-                await bot.sendMessage(
-
-                    adminId,
-
-                    `Выберите действие ` +
-                    `с заказом ` +
-                    `\`${order.order_id}\`:`,
-                    
-                    {
-                        parse_mode: "Markdown",
-
-                        ...adminOrderButtons(
-                            order.order_id
-                        )
-                    }
-                );
-
             } catch (error) {
 
                 console.error(
 
-                    `Ошибка отправки ` +
-                    `админу ${adminId}:`,
+                    `Ошибка отправки админу ${adminId}:`,
 
                     error.message
                 );
@@ -2341,23 +2706,41 @@ async function handleReceipt(msg) {
     }
 }
 
-// Фото чека
+
 bot.on(
     "photo",
     handleReceipt
 );
 
-// Документ чека
+
 bot.on(
     "document",
     handleReceipt
 );
+
+
+// ============================================================
+// ERROR HANDLERS
+// ============================================================
+
+bot.on(
+    "polling_error",
+    error => {
+
+        console.error(
+            "❌ TELEGRAM POLLING ERROR:",
+            error.message
+        );
+    }
+);
+
 
 // ============================================================
 // START DATABASE
 // ============================================================
 
 initDb();
+
 
 console.log(
     "=========================================="
