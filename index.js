@@ -10,6 +10,7 @@ const fs = require("fs");
 // SMTP не используется.
 // Вход = проверка активной подписки.
 // После подтверждения оплаты пользователь получает ключ.
+// Ключ = Telegram ID пользователя.
 // ============================================================
 
 
@@ -268,32 +269,21 @@ function getUser(userId) {
 // APP KEY
 // ============================================================
 
-function generateAppKey() {
+// Ключ приложения = Telegram ID пользователя.
+// Например:
+// Telegram ID: 8723208814
+// Ключ:        8723208814
 
-    return crypto
-        .randomBytes(16)
-        .toString("hex")
-        .toUpperCase();
+function generateAppKey(userId) {
+
+    return String(userId);
 }
 
 
 function getOrCreateAppKey(userId) {
 
-    const user =
-        getUser(userId);
-
-
-    if (
-        user &&
-        user.app_key
-    ) {
-
-        return user.app_key;
-    }
-
-
     const key =
-        generateAppKey();
+        generateAppKey(userId);
 
 
     db.prepare(`
@@ -2682,6 +2672,10 @@ console.log(
 console.log(
     "💳 CARD:",
     CARD_NUMBER
+);
+
+console.log(
+    "🔑 APP KEY = TELEGRAM USER ID"
 );
 
 console.log(
