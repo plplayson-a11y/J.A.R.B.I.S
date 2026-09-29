@@ -9,7 +9,7 @@ const fs = require("fs");
 // Регистрация удалена.
 // SMTP не используется.
 // Вход = проверка активной подписки.
-// После подтверждения оплаты админом пользователь получает ключ.
+// После подтверждения оплаты пользователь получает ключ.
 // ============================================================
 
 
@@ -46,7 +46,6 @@ if (!BOT_TOKEN) {
 
 // ============================================================
 // TELEGRAM BOT
-// ВАЖНО: этот блок должен быть ДО bot.on / bot.onText
 // ============================================================
 
 const bot = new TelegramBot(BOT_TOKEN, {
@@ -68,7 +67,7 @@ db.pragma("journal_mode = WAL");
 
 
 // ============================================================
-// DATABASE INIT
+// DATABASE FUNCTIONS
 // ============================================================
 
 function columnExists(table, column) {
@@ -83,11 +82,7 @@ function columnExists(table, column) {
 }
 
 
-function addColumn(
-    table,
-    column,
-    definition
-) {
+function addColumn(table, column, definition) {
 
     if (!columnExists(table, column)) {
 
@@ -154,8 +149,6 @@ function initDb() {
     `);
 
 
-    // Совместимость со старой базой
-
     addColumn(
         "users",
         "username",
@@ -206,8 +199,6 @@ function initDb() {
     );
 
 
-    // Добавляем админов
-
     for (const adminId of ADMIN_IDS) {
 
         db.prepare(`
@@ -224,13 +215,17 @@ function initDb() {
 
 
 // ============================================================
+// ИНИЦИАЛИЗАЦИЯ БАЗЫ
+// ============================================================
+
+initDb();
+
+
+// ============================================================
 // USERS
 // ============================================================
 
-function upsertUser(
-    userId,
-    username = null
-) {
+function upsertUser(userId, username = null) {
 
     db.prepare(`
         INSERT OR IGNORE INTO users
@@ -286,6 +281,7 @@ function getOrCreateAppKey(userId) {
 
     const user =
         getUser(userId);
+
 
     if (
         user &&
@@ -443,10 +439,7 @@ function setAdminOnline(userId) {
 }
 
 
-function setAdminOffline(
-    userId,
-    until
-) {
+function setAdminOffline(userId, until) {
 
     db.prepare(`
         UPDATE admins
@@ -489,7 +482,7 @@ function getStatusText() {
 
 
 // ============================================================
-// ADMIN OFFLINE TIME
+// OFFLINE TIME
 // ============================================================
 
 function parseOfflineTime(text) {
@@ -521,28 +514,21 @@ function parseOfflineTime(text) {
 
 
         if (unit === "d") {
-
             totalSeconds +=
                 number * 86400;
         }
 
-
         if (unit === "h") {
-
             totalSeconds +=
                 number * 3600;
         }
 
-
         if (unit === "m") {
-
             totalSeconds +=
                 number * 60;
         }
 
-
         if (unit === "s") {
-
             totalSeconds +=
                 number;
         }
@@ -611,34 +597,19 @@ function formatDuration(seconds) {
 
 
     if (days) {
-
-        result.push(
-            `${days}д`
-        );
+        result.push(`${days}д`);
     }
-
 
     if (hours) {
-
-        result.push(
-            `${hours}ч`
-        );
+        result.push(`${hours}ч`);
     }
-
 
     if (minutes) {
-
-        result.push(
-            `${minutes}мин`
-        );
+        result.push(`${minutes}мин`);
     }
 
-
     if (seconds) {
-
-        result.push(
-            `${seconds}сек`
-        );
+        result.push(`${seconds}сек`);
     }
 
 
@@ -673,10 +644,7 @@ function isSubActive(userId) {
 }
 
 
-function setSubscription(
-    userId,
-    days
-) {
+function setSubscription(userId, days) {
 
     const user =
         getUser(userId);
@@ -748,7 +716,6 @@ function createOrder(
 
 
     if (!tariff) {
-
         throw new Error(
             "Тариф не найден"
         );
@@ -778,24 +745,15 @@ function createOrder(
     `).run(
 
         orderId,
-
         userId,
-
         tariffKey,
-
         tariff.price,
-
         "pending",
-
         new Date().toISOString(),
-
         name,
-
         email
     );
 
-
-    // Сохраняем имя и email пользователя
 
     db.prepare(`
         UPDATE users
@@ -936,7 +894,7 @@ function confirmOrder(orderId) {
 
 
 // ============================================================
-// REJECT ORDER
+// REJECT
 // ============================================================
 
 function rejectOrder(orderId) {
@@ -987,7 +945,7 @@ function rejectOrder(orderId) {
 
 
 // ============================================================
-// EMAIL VALIDATION
+// EMAIL
 // ============================================================
 
 function validEmail(email) {
@@ -1011,32 +969,25 @@ function mainMenu() {
 
                 [
                     {
-                        text:
-                            "🔐 Войти"
+                        text: "🔐 Войти"
                     },
-
                     {
-                        text:
-                            "🛒 Купить"
+                        text: "🛒 Купить"
                     }
                 ],
 
                 [
                     {
-                        text:
-                            "👤 Мой аккаунт"
+                        text: "👤 Мой аккаунт"
                     },
-
                     {
-                        text:
-                            "ℹ️ Помощь"
+                        text: "ℹ️ Помощь"
                     }
                 ],
 
                 [
                     {
-                        text:
-                            "🛠 Тех.поддержка"
+                        text: "🛠 Тех.поддержка"
                     }
                 ]
 
@@ -1064,71 +1015,50 @@ function buyMenu() {
 
                 [
                     {
-                        text:
-                            "80 ₽ — 3 дня",
-
-                        callback_data:
-                            "buy_80"
+                        text: "80 ₽ — 3 дня",
+                        callback_data: "buy_80"
                     }
                 ],
 
                 [
                     {
-                        text:
-                            "350 ₽ — 1 месяц",
-
-                        callback_data:
-                            "buy_350"
+                        text: "350 ₽ — 1 месяц",
+                        callback_data: "buy_350"
                     }
                 ],
 
                 [
                     {
-                        text:
-                            "700 ₽ — 3 месяца",
-
-                        callback_data:
-                            "buy_700"
+                        text: "700 ₽ — 3 месяца",
+                        callback_data: "buy_700"
                     }
                 ],
 
                 [
                     {
-                        text:
-                            "1400 ₽ — 6 месяцев",
-
-                        callback_data:
-                            "buy_1400"
+                        text: "1400 ₽ — 6 месяцев",
+                        callback_data: "buy_1400"
                     }
                 ],
 
                 [
                     {
-                        text:
-                            "2800 ₽ — 1 год",
-
-                        callback_data:
-                            "buy_2800"
+                        text: "2800 ₽ — 1 год",
+                        callback_data: "buy_2800"
                     }
                 ],
 
                 [
                     {
-                        text:
-                            "5000 ₽ — навсегда",
-
-                        callback_data:
-                            "buy_5000"
+                        text: "5000 ₽ — навсегда",
+                        callback_data: "buy_5000"
                     }
                 ],
 
                 [
                     {
-                        text:
-                            "⬅️ Назад",
-
-                        callback_data:
-                            "back"
+                        text: "⬅️ Назад",
+                        callback_data: "back"
                     }
                 ]
 
@@ -1152,31 +1082,22 @@ function adminMenu() {
 
                 [
                     {
-                        text:
-                            "🟢 Я онлайн",
-
-                        callback_data:
-                            "admin_online"
+                        text: "🟢 Я онлайн",
+                        callback_data: "admin_online"
                     }
                 ],
 
                 [
                     {
-                        text:
-                            "🔴 Я не онлайн",
-
-                        callback_data:
-                            "admin_offline"
+                        text: "🔴 Я не онлайн",
+                        callback_data: "admin_offline"
                     }
                 ],
 
                 [
                     {
-                        text:
-                            "⬅️ Главное меню",
-
-                        callback_data:
-                            "back"
+                        text: "⬅️ Главное меню",
+                        callback_data: "back"
                     }
                 ]
 
@@ -1190,9 +1111,7 @@ function adminMenu() {
 // ADMIN ORDER BUTTONS
 // ============================================================
 
-function adminOrderButtons(
-    orderId
-) {
+function adminOrderButtons(orderId) {
 
     return {
 
@@ -1201,23 +1120,17 @@ function adminOrderButtons(
             inline_keyboard: [
 
                 [
-
                     {
-                        text:
-                            "✅ Подтвердить",
-
+                        text: "✅ Подтвердить",
                         callback_data:
                             `confirm_${orderId}`
                     },
 
                     {
-                        text:
-                            "❌ Отклонить",
-
+                        text: "❌ Отклонить",
                         callback_data:
                             `reject_${orderId}`
                     }
-
                 ]
 
             ]
@@ -1238,7 +1151,7 @@ const adminWaitingTime =
 
 
 // ============================================================
-// /START
+// START
 // ============================================================
 
 bot.onText(
@@ -1257,23 +1170,27 @@ bot.onText(
             );
 
 
+            const welcomeText =
+
+                "📋 Главное меню\n\n" +
+
+                "👋 Добро пожаловать в J.A.R.B.I.S!\n\n" +
+
+                "🚀 Здесь вы можете приобрести " +
+                "подписку и получить доступ " +
+                "к приложению.\n\n" +
+
+                "🔐 После подтверждения оплаты " +
+                "вам будет выдан персональный ключ.\n\n" +
+
+                "🛒 Выберите тариф через кнопку «Купить».\n\n" +
+
+                getStatusText();
+
+
             await bot.sendMessage(
-
                 msg.chat.id,
-
-                "👋 Добро пожаловать " +
-                "в J.A.R.B.I.S!\n\n" +
-
-                "🔐 Войдите в приложение " +
-                "после покупки подписки.\n\n" +
-
-                "🛒 Выберите тариф и оплатите заказ.\n" +
-
-                "👤 После подтверждения оплаты " +
-                "вы получите ключ для приложения.\n\n" +
-
-                getStatusText(),
-
+                welcomeText,
                 mainMenu()
             );
 
@@ -1318,8 +1235,9 @@ bot.onText(
 
             msg.chat.id,
 
-            `🆔 Ваш Telegram ID:\n\n` +
-            `${msg.from.id}`
+            `🆔 Ваш Telegram ID:\n\n${msg.from.id}`,
+
+            mainMenu()
         );
     }
 );
@@ -1359,7 +1277,7 @@ bot.onText(
 
 
 // ============================================================
-// TEXT
+// MESSAGE
 // ============================================================
 
 bot.on(
@@ -1369,7 +1287,6 @@ bot.on(
         try {
 
             if (!msg.text) {
-
                 return;
             }
 
@@ -1469,11 +1386,13 @@ bot.on(
 
                     "🔴 Вы теперь не онлайн.\n\n" +
 
-                    `⏱ Время: ` +
-                    `${formatDuration(seconds)}\n` +
+                    `⏱ Время: ${
+                        formatDuration(seconds)
+                    }\n` +
 
-                    `🕐 До: ` +
-                    `${until.toLocaleString("ru-RU")}\n\n` +
+                    `🕐 До: ${
+                        until.toLocaleString("ru-RU")
+                    }\n\n` +
 
                     "Когда вернётесь, " +
                     "нажмите «🟢 Я онлайн».",
@@ -1567,9 +1486,8 @@ bot.on(
 
                         "У вас нет активной подписки.\n\n" +
 
-                        "🛒 Купите подписку, " +
-                        "после чего администратор " +
-                        "подтвердит оплату.",
+                        "🛒 Купите подписку и дождитесь " +
+                        "подтверждения оплаты администратором.",
 
                         mainMenu()
                     );
@@ -1591,19 +1509,17 @@ bot.on(
 
                     "✅ Вход разрешён!\n\n" +
 
-                    "🔑 Ваш ключ:\n" +
+                    "🔑 Ваш ключ:\n\n" +
 
                     `\`${key}\`\n\n` +
 
-                    "📱 Откройте приложение " +
-                    "J.A.R.B.I.S\n" +
+                    "📱 Откройте приложение J.A.R.B.I.S\n" +
 
-                    "и введите этот ключ " +
-                    "для входа.",
+                    "и введите этот ключ для входа.",
 
                     {
-                        parse_mode:
-                            "Markdown"
+                        parse_mode: "Markdown",
+                        ...mainMenu()
                     }
                 );
 
@@ -1624,7 +1540,10 @@ bot.on(
 
                     msg.chat.id,
 
-                    "🛒 Выберите тариф:",
+                    "🛒 Выберите тариф:\n\n" +
+
+                    "💡 После выбора тарифа вам нужно будет " +
+                    "указать имя и почту.",
 
                     buyMenu()
                 );
@@ -1676,20 +1595,18 @@ bot.on(
 
                     "ℹ️ Помощь\n\n" +
 
-                    "🔐 Войти — проверить " +
-                    "активную подписку и получить " +
-                    "ключ приложения.\n\n" +
+                    "🔐 Войти — проверить активную " +
+                    "подписку и получить ключ.\n\n" +
 
-                    "🛒 Купить — выбрать тариф.\n\n" +
+                    "🛒 Купить — выбрать тариф и оформить заказ.\n\n" +
 
-                    "👤 Мой аккаунт — информация " +
+                    "👤 Мой аккаунт — посмотреть информацию " +
                     "о вашем аккаунте.\n\n" +
 
                     "🛠 Тех.поддержка — контакты поддержки.\n\n" +
 
-                    "💳 Реквизиты для оплаты:\n" +
-                    `${CARD_NUMBER}\n` +
-                    `${CARD_HOLDER}`,
+                    "💳 Оплата производится по реквизитам, " +
+                    "которые бот покажет после создания заказа.",
 
                     mainMenu()
                 );
@@ -1721,6 +1638,7 @@ bot.on(
 
                     subscription =
                         "✅ Подписка активна.\n\n" +
+
                         `📅 До: ${
                             new Date(
                                 user.sub_until
@@ -1745,6 +1663,14 @@ bot.on(
                             : "не указан"
                     }\n\n` +
 
+                    `📧 Почта: ${
+                        user.email || "не указана"
+                    }\n\n` +
+
+                    `💰 Всего оплачено: ${
+                        user.total_paid || 0
+                    } ₽\n\n` +
+
                     subscription,
 
                     mainMenu()
@@ -1764,7 +1690,6 @@ bot.on(
 
 
             if (!state) {
-
                 return;
             }
 
@@ -1788,7 +1713,8 @@ bot.on(
                         msg.chat.id,
 
                         "❌ Имя должно содержать " +
-                        "от 2 до 100 символов."
+                        "от 2 до 100 символов.\n\n" +
+                        "Введите имя ещё раз."
                     );
 
                     return;
@@ -1813,6 +1739,7 @@ bot.on(
                     msg.chat.id,
 
                     "📧 Введите вашу почту:\n\n" +
+
                     "Например:\n" +
                     "example@gmail.com"
                 );
@@ -1881,8 +1808,7 @@ bot.on(
 
                     "🧾 ЗАКАЗ СОЗДАН\n\n" +
 
-                    `№ Заказа: ` +
-                    `\`${orderId}\`\n\n` +
+                    `№ Заказа: \`${orderId}\`\n\n` +
 
                     `👤 Имя: ${state.name}\n` +
 
@@ -1903,35 +1829,25 @@ bot.on(
 
                     {
 
-                        parse_mode:
-                            "Markdown",
+                        parse_mode: "Markdown",
 
                         reply_markup: {
 
                             inline_keyboard: [
 
                                 [
-
                                     {
-                                        text:
-                                            "📷 Я оплатил",
-
+                                        text: "📷 Я оплатил",
                                         callback_data:
                                             `paid_${orderId}`
                                     }
-
                                 ],
 
                                 [
-
                                     {
-                                        text:
-                                            "⬅️ Назад",
-
-                                        callback_data:
-                                            "back"
+                                        text: "⬅️ Назад",
+                                        callback_data: "back"
                                     }
-
                                 ]
 
                             ]
@@ -2007,6 +1923,9 @@ bot.on(
                     chatId,
 
                     "📋 Главное меню\n\n" +
+
+                    "👋 Вы вернулись в главное меню.\n\n" +
+
                     "Выберите действие:",
 
                     mainMenu()
@@ -2034,11 +1953,8 @@ bot.on(
                         query.id,
 
                         {
-                            text:
-                                "Нет доступа",
-
-                            show_alert:
-                                true
+                            text: "Нет доступа",
+                            show_alert: true
                         }
                     );
 
@@ -2054,8 +1970,7 @@ bot.on(
                     query.id,
 
                     {
-                        text:
-                            "Вы онлайн 🟢"
+                        text: "Вы онлайн 🟢"
                     }
                 );
 
@@ -2092,11 +2007,8 @@ bot.on(
                         query.id,
 
                         {
-                            text:
-                                "Нет доступа",
-
-                            show_alert:
-                                true
+                            text: "Нет доступа",
+                            show_alert: true
                         }
                     );
 
@@ -2121,10 +2033,10 @@ bot.on(
                     "⏱ На какое время " +
                     "вы будете не онлайн?\n\n" +
 
-                    "5h\n" +
-                    "5m\n" +
-                    "5s\n" +
-                    "5d\n\n" +
+                    "5h — 5 часов\n" +
+                    "5m — 5 минут\n" +
+                    "5s — 5 секунд\n" +
+                    "5d — 5 дней\n\n" +
 
                     "⚠️ Максимум — 15 дней."
                 );
@@ -2157,11 +2069,8 @@ bot.on(
                         query.id,
 
                         {
-                            text:
-                                "Тариф не найден",
-
-                            show_alert:
-                                true
+                            text: "Тариф не найден",
+                            show_alert: true
                         }
                     );
 
@@ -2174,15 +2083,9 @@ bot.on(
                     userId,
 
                     {
-
-                        type:
-                            "buy",
-
-                        step:
-                            "name",
-
-                        tariffKey:
-                            tariffKey
+                        type: "buy",
+                        step: "name",
+                        tariffKey: tariffKey
                     }
                 );
 
@@ -2231,11 +2134,8 @@ bot.on(
                         query.id,
 
                         {
-                            text:
-                                "Заказ не найден",
-
-                            show_alert:
-                                true
+                            text: "Заказ не найден",
+                            show_alert: true
                         }
                     );
 
@@ -2254,9 +2154,7 @@ bot.on(
                         {
                             text:
                                 "Этот заказ принадлежит другому пользователю",
-
-                            show_alert:
-                                true
+                            show_alert: true
                         }
                     );
 
@@ -2275,8 +2173,7 @@ bot.on(
 
                     "📷 Отправьте чек оплаты.\n\n" +
 
-                    `🧾 Заказ: ` +
-                    `\`${order.order_id}\`\n\n` +
+                    `🧾 Заказ: \`${order.order_id}\`\n\n` +
 
                     `👤 Имя: ${order.name}\n` +
 
@@ -2292,8 +2189,7 @@ bot.on(
                     "передан администратору.",
 
                     {
-                        parse_mode:
-                            "Markdown"
+                        parse_mode: "Markdown"
                     }
                 );
 
@@ -2319,11 +2215,8 @@ bot.on(
                         query.id,
 
                         {
-                            text:
-                                "Нет доступа",
-
-                            show_alert:
-                                true
+                            text: "Нет доступа",
+                            show_alert: true
                         }
                     );
 
@@ -2356,8 +2249,7 @@ bot.on(
                                     ? "Заказ уже обработан"
                                     : "Заказ не найден",
 
-                            show_alert:
-                                true
+                            show_alert: true
                         }
                     );
 
@@ -2381,16 +2273,12 @@ bot.on(
                     await bot.editMessageReplyMarkup(
 
                         {
-                            inline_keyboard:
-                                []
+                            inline_keyboard: []
                         },
 
                         {
-                            chat_id:
-                                chatId,
-
-                            message_id:
-                                messageId
+                            chat_id: chatId,
+                            message_id: messageId
                         }
                     );
 
@@ -2419,7 +2307,7 @@ bot.on(
                         "ru-RU"
                     )}\n\n` +
 
-                    "🔑 Ваш ключ:\n" +
+                    "🔑 Ваш ключ:\n\n" +
 
                     `\`${result.key}\`\n\n` +
 
@@ -2428,8 +2316,8 @@ bot.on(
                     "и введите этот ключ для входа.",
 
                     {
-                        parse_mode:
-                            "Markdown"
+                        parse_mode: "Markdown",
+                        ...mainMenu()
                     }
                 );
 
@@ -2455,11 +2343,8 @@ bot.on(
                         query.id,
 
                         {
-                            text:
-                                "Нет доступа",
-
-                            show_alert:
-                                true
+                            text: "Нет доступа",
+                            show_alert: true
                         }
                     );
 
@@ -2486,11 +2371,8 @@ bot.on(
                         query.id,
 
                         {
-                            text:
-                                "Заказ уже обработан",
-
-                            show_alert:
-                                true
+                            text: "Заказ уже обработан",
+                            show_alert: true
                         }
                     );
 
@@ -2503,8 +2385,7 @@ bot.on(
                     query.id,
 
                     {
-                        text:
-                            "Заказ отклонён ❌"
+                        text: "Заказ отклонён ❌"
                     }
                 );
 
@@ -2514,16 +2395,12 @@ bot.on(
                     await bot.editMessageReplyMarkup(
 
                         {
-                            inline_keyboard:
-                                []
+                            inline_keyboard: []
                         },
 
                         {
-                            chat_id:
-                                chatId,
-
-                            message_id:
-                                messageId
+                            chat_id: chatId,
+                            message_id: messageId
                         }
                     );
 
@@ -2534,15 +2411,16 @@ bot.on(
 
                     result.userId,
 
-                    "❌ Ваша оплата " +
-                    "не была подтверждена.\n\n" +
+                    "❌ Ваша оплата не была подтверждена.\n\n" +
 
                     "Если вы уверены, что оплатили, " +
                     "обратитесь в поддержку:\n\n" +
 
                     `Приложение: ${SUPPORT_APP}\n` +
 
-                    `Бот: ${SUPPORT_BOT}`
+                    `Бот: ${SUPPORT_BOT}`,
+
+                    mainMenu()
                 );
 
 
@@ -2564,11 +2442,8 @@ bot.on(
                     query.id,
 
                     {
-                        text:
-                            "Произошла ошибка",
-
-                        show_alert:
-                            true
+                        text: "Произошла ошибка",
+                        show_alert: true
                     }
                 );
 
@@ -2599,7 +2474,10 @@ async function handleReceipt(msg) {
                 msg.chat.id,
 
                 "❌ У вас нет ожидающего заказа.\n\n" +
-                "Сначала создайте заказ через «🛒 Купить»."
+
+                "Сначала создайте заказ через «🛒 Купить».",
+
+                mainMenu()
             );
 
             return;
@@ -2614,7 +2492,9 @@ async function handleReceipt(msg) {
 
             `🧾 Заказ: ${order.order_id}\n\n` +
 
-            "Ожидайте проверки администратора."
+            "Ожидайте проверки администратора.",
+
+            mainMenu()
         );
 
 
@@ -2624,12 +2504,17 @@ async function handleReceipt(msg) {
                 : "нет";
 
 
+        const tariff =
+            TARIFFS[
+                order.tariff
+            ];
+
+
         const adminText =
 
             "📩 НОВАЯ ЗАЯВКА\n\n" +
 
-            `🧾 Заказ: ` +
-            `\`${order.order_id}\`\n\n` +
+            `🧾 Заказ: \`${order.order_id}\`\n\n` +
 
             `👤 Имя: ${order.name}\n` +
 
@@ -2639,11 +2524,7 @@ async function handleReceipt(msg) {
 
             `👤 Username: ${username}\n\n` +
 
-            `📦 Тариф: ${
-                TARIFFS[
-                    order.tariff
-                ].name
-            }\n` +
+            `📦 Тариф: ${tariff.name}\n` +
 
             `💰 Сумма: ${order.amount} ₽\n\n` +
 
@@ -2652,8 +2533,7 @@ async function handleReceipt(msg) {
 
 
         for (
-            const adminId
-            of ADMIN_IDS
+            const adminId of ADMIN_IDS
         ) {
 
             try {
@@ -2665,17 +2545,13 @@ async function handleReceipt(msg) {
                     adminText,
 
                     {
-                        parse_mode:
-                            "Markdown",
-
+                        parse_mode: "Markdown",
                         ...adminOrderButtons(
                             order.order_id
                         )
                     }
                 );
 
-
-                // Пересылаем чек
 
                 await bot.forwardMessage(
 
@@ -2707,11 +2583,19 @@ async function handleReceipt(msg) {
 }
 
 
+// ============================================================
+// PHOTO
+// ============================================================
+
 bot.on(
     "photo",
     handleReceipt
 );
 
+
+// ============================================================
+// DOCUMENT
+// ============================================================
 
 bot.on(
     "document",
@@ -2720,7 +2604,7 @@ bot.on(
 
 
 // ============================================================
-// ERROR HANDLERS
+// POLLING ERROR
 // ============================================================
 
 bot.on(
@@ -2736,11 +2620,36 @@ bot.on(
 
 
 // ============================================================
-// START DATABASE
+// UNCAUGHT ERRORS
 // ============================================================
 
-initDb();
+process.on(
+    "uncaughtException",
+    error => {
 
+        console.error(
+            "❌ UNCAUGHT EXCEPTION:",
+            error
+        );
+    }
+);
+
+
+process.on(
+    "unhandledRejection",
+    error => {
+
+        console.error(
+            "❌ UNHANDLED REJECTION:",
+            error
+        );
+    }
+);
+
+
+// ============================================================
+// LOG
+// ============================================================
 
 console.log(
     "=========================================="
