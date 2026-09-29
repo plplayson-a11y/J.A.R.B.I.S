@@ -5,8 +5,8 @@ const fs = require("fs");
 const nodemailer = require("nodemailer");
 
 // ============================================================
-// J.A.R.V.I.S — TELEGRAM SUBSCRIPTION BOT
-// РЕГИСТРАЦИЯ + EMAIL + ПАРОЛЬ + ВХОД + ПОДПИСКИ
+// J.A.R.B.I.S — TELEGRAM SUBSCRIPTION BOT
+// Регистрация + Email подтверждение + Вход + Покупка подписки
 // ============================================================
 
 // ============================================================
@@ -20,20 +20,22 @@ const ADMIN_IDS = [
     8882462981
 ];
 
-// Техподдержка
+// ============================================================
+// ТЕХПОДДЕРЖКА
+// ============================================================
+
 const APP_SUPPORT = "@JARBIS_help";
 const BOT_SUPPORT = "@sakuraYTST";
 
-// Карта
-// Можно использовать CARD_ID или старое CARD_NUMBER
-const CARD_ID =
-    process.env.CARD_ID ||
-    process.env.CARD_NUMBER ||
-    "2200 1536 2364 5513";
+// ============================================================
+// РЕКВИЗИТЫ
+// ============================================================
+
+const CARD_NUMBER =
+    process.env.CARD_NUMBER || "2200 1536 2364 5513";
 
 const CARD_HOLDER =
-    process.env.CARD_HOLDER ||
-    "Получатель: Алексей М.";
+    process.env.CARD_HOLDER || "Получатель: Алексей М.";
 
 // ============================================================
 // ТАРИФЫ
@@ -41,16 +43,16 @@ const CARD_HOLDER =
 
 const TARIFFS = {
 
-    "50": {
+    "80": {
         name: "3 дня",
         days: 3,
-        price: 50
+        price: 80
     },
 
-    "200": {
+    "350": {
         name: "1 месяц",
         days: 30,
-        price: 200
+        price: 350
     },
 
     "700": {
@@ -94,32 +96,19 @@ const SMTP_USER =
 const SMTP_PASS =
     process.env.SMTP_PASS;
 
-// ============================================================
-// ПРОВЕРКА ОСНОВНЫХ VARIABLES
-// ============================================================
-
 if (!BOT_TOKEN) {
 
     console.error(
-        "❌ ОШИБКА: TELEGRAM_TOKEN не установлен!"
+        "❌ TELEGRAM_TOKEN не установлен!"
     );
 
     process.exit(1);
 }
 
-if (!SMTP_USER) {
+if (!SMTP_USER || !SMTP_PASS) {
 
     console.error(
-        "❌ ОШИБКА: SMTP_USER не установлен!"
-    );
-
-    process.exit(1);
-}
-
-if (!SMTP_PASS) {
-
-    console.error(
-        "❌ ОШИБКА: SMTP_PASS не установлен!"
+        "❌ SMTP_USER и SMTP_PASS должны быть установлены!"
     );
 
     process.exit(1);
@@ -139,119 +128,92 @@ const mailer = nodemailer.createTransport({
         SMTP_PORT === 465,
 
     auth: {
-
-        user:
-            SMTP_USER,
-
-        pass:
-            SMTP_PASS
-    },
-
-    connectionTimeout: 15000,
-
-    greetingTimeout: 15000,
-
-    socketTimeout: 20000
+        user: SMTP_USER,
+        pass: SMTP_PASS
+    }
 });
 
-// Проверка SMTP при запуске
-(async () => {
+// ============================================================
+// ПРОВЕРКА SMTP
+// ============================================================
 
-    try {
-
-        await mailer.verify();
+mailer.verify()
+    .then(() => {
 
         console.log(
-            "=========================================="
+            "✅ SMTP соединение успешно"
         );
 
         console.log(
-            "✅ SMTP ПОДКЛЮЧЕНИЕ УСПЕШНО"
-        );
-
-        console.log(
-            "📧 HOST:",
-            SMTP_HOST
-        );
-
-        console.log(
-            "📧 PORT:",
-            SMTP_PORT
-        );
-
-        console.log(
-            "📧 USER:",
+            "📧 SMTP USER:",
             SMTP_USER
         );
 
         console.log(
-            "=========================================="
+            "📧 SMTP HOST:",
+            SMTP_HOST
         );
 
-    } catch (error) {
-
-        console.error(
-            "=========================================="
+        console.log(
+            "📧 SMTP PORT:",
+            SMTP_PORT
         );
 
-        console.error(
-            "❌ SMTP ОШИБКА"
-        );
+    })
+    .catch(error => {
 
         console.error(
-            "CODE:",
-            error.code
-        );
-
-        console.error(
-            "COMMAND:",
-            error.command
+            "❌ SMTP VERIFY ERROR"
         );
 
         console.error(
-            "RESPONSE:",
-            error.response
-        );
-
-        console.error(
-            "MESSAGE:",
+            "message:",
             error.message
         );
 
         console.error(
-            "=========================================="
+            "code:",
+            error.code
         );
-    }
 
-})();
+        console.error(
+            "command:",
+            error.command
+        );
+
+        console.error(
+            "response:",
+            error.response
+        );
+
+        console.error(
+            "responseCode:",
+            error.responseCode
+        );
+    });
 
 // ============================================================
 // TELEGRAM
 // ============================================================
 
-const bot =
-    new TelegramBot(
-        BOT_TOKEN,
-        {
-            polling: true
-        }
-    );
+const bot = new TelegramBot(
+    BOT_TOKEN,
+    {
+        polling: true
+    }
+);
 
 // ============================================================
 // DATABASE
 // ============================================================
 
-const DB_FILE =
-    fs.existsSync("/data")
-        ? "/data/subscriptions.db"
-        : "./subscriptions.db";
+const DB_FILE = fs.existsSync("/data")
+    ? "/data/subscriptions.db"
+    : "./subscriptions.db";
 
-const db =
-    new Database(DB_FILE);
+const db = new Database(DB_FILE);
 
-db.pragma(
-    "journal_mode = WAL"
-);
+db.pragma("journal_mode = WAL");
 
 // ============================================================
 // DATABASE HELPERS
@@ -335,7 +297,11 @@ function initDb() {
 
             created_at TEXT NOT NULL,
 
-            paid_at TEXT
+            paid_at TEXT,
+
+            name TEXT,
+
+            email TEXT
         );
 
         CREATE TABLE IF NOT EXISTS admins (
@@ -348,8 +314,6 @@ function initDb() {
         );
 
     `);
-
-    // Старые базы данных
 
     addColumn(
         "users",
@@ -405,8 +369,6 @@ function initDb() {
         "TEXT"
     );
 
-    // Администраторы
-
     for (
         const adminId
         of ADMIN_IDS
@@ -423,9 +385,7 @@ function initDb() {
 
             VALUES (?, 1, NULL)
 
-        `).run(
-            adminId
-        );
+        `).run(adminId);
     }
 }
 
@@ -458,7 +418,9 @@ function upsertUser(
         db.prepare(`
 
             UPDATE users
+
             SET username = ?
+
             WHERE user_id = ?
 
         `).run(
@@ -468,50 +430,55 @@ function upsertUser(
     }
 }
 
-function getUser(userId) {
+function getUser(
+    userId
+) {
 
     return db.prepare(`
 
         SELECT *
+
         FROM users
+
         WHERE user_id = ?
 
-    `).get(
-        userId
-    );
+    `).get(userId);
 }
 
-function getUserByEmail(email) {
+function getUserByEmail(
+    email
+) {
 
     return db.prepare(`
 
         SELECT *
+
         FROM users
+
         WHERE lower(email) = lower(?)
 
-    `).get(
-        email
-    );
+    `).get(email);
 }
 
 // ============================================================
-// AUTH
+// EMAIL AUTH
 // ============================================================
 
 const pendingAuth =
     new Map();
 
-const userStates =
-    new Map();
-
-function normalizeEmail(email) {
+function normalizeEmail(
+    email
+) {
 
     return email
         .trim()
         .toLowerCase();
 }
 
-function validEmail(email) {
+function validEmail(
+    email
+) {
 
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/
         .test(email);
@@ -527,7 +494,9 @@ function generateCode() {
     );
 }
 
-function hashPassword(password) {
+function hashPassword(
+    password
+) {
 
     return crypto
         .createHash("sha256")
@@ -535,18 +504,13 @@ function hashPassword(password) {
         .digest("hex");
 }
 
-function validPassword(password) {
+function validPassword(
+    password
+) {
 
     return (
         password.length >= 6 &&
         password.length <= 128
-    );
-}
-
-function clearAuth(userId) {
-
-    pendingAuth.delete(
-        userId
     );
 }
 
@@ -576,7 +540,7 @@ async function sendVerificationCode(
     await mailer.sendMail({
 
         from:
-            `"J.A.R.B.I.S" <${SMTP_USER}>`,
+            `J.A.R.B.I.S <${SMTP_USER}>`,
 
         to:
             email,
@@ -602,23 +566,15 @@ ${code}
         html:
 
 `
-<div style="
-    font-family:Arial;
-    max-width:600px;
-    margin:auto;
-">
+<div style="font-family:Arial,sans-serif">
 
     <h2>J.A.R.B.I.S</h2>
 
-    <p>${title}</p>
+    <h3>${title}</h3>
 
     <p>Ваш код:</p>
 
-    <h1 style="
-        letter-spacing:8px;
-    ">
-        ${code}
-    </h1>
+    <h1>${code}</h1>
 
     <p>
         Код действует 10 минут.
@@ -634,29 +590,42 @@ ${code}
     });
 }
 
+function clearAuth(
+    userId
+) {
+
+    pendingAuth.delete(
+        userId
+    );
+}
+
 // ============================================================
 // ADMINS
 // ============================================================
 
-function isAdmin(userId) {
+function isAdmin(
+    userId
+) {
 
     return ADMIN_IDS.includes(
         Number(userId)
     );
 }
 
-function getAdminStatus(userId) {
+function getAdminStatus(
+    userId
+) {
 
     const row =
         db.prepare(`
 
             SELECT *
+
             FROM admins
+
             WHERE user_id = ?
 
-        `).get(
-            userId
-        );
+        `).get(userId);
 
     if (!row) {
 
@@ -689,9 +658,7 @@ function getAdminStatus(userId) {
 
                 WHERE user_id = ?
 
-            `).run(
-                userId
-            );
+            `).run(userId);
 
             return {
                 online: true
@@ -723,9 +690,7 @@ function setAdminOnline(
 
         WHERE user_id = ?
 
-    `).run(
-        userId
-    );
+    `).run(userId);
 }
 
 function setAdminOffline(
@@ -763,9 +728,7 @@ function getStatusText() {
         getOnlineAdminsCount() > 0
     ) {
 
-        return (
-            "🟢 Администратор в онлайне"
-        );
+        return "🟢 Администратор в онлайне";
     }
 
     return (
@@ -776,10 +739,12 @@ function getStatusText() {
 }
 
 // ============================================================
-// OFFLINE TIME
+// TIME
 // ============================================================
 
-function parseOfflineTime(text) {
+function parseOfflineTime(
+    text
+) {
 
     const value =
         text
@@ -852,7 +817,9 @@ function parseOfflineTime(text) {
     return totalSeconds;
 }
 
-function formatDuration(seconds) {
+function formatDuration(
+    seconds
+) {
 
     const result = [];
 
@@ -904,7 +871,9 @@ function formatDuration(seconds) {
 // SUBSCRIPTIONS
 // ============================================================
 
-function isSubActive(userId) {
+function isSubActive(
+    userId
+) {
 
     const user =
         getUser(userId);
@@ -1045,45 +1014,48 @@ function createOrder(
     return orderId;
 }
 
-function getOrder(orderId) {
+function getOrder(
+    orderId
+) {
 
     return db.prepare(`
 
         SELECT *
+
         FROM payments
+
         WHERE order_id = ?
 
-    `).get(
-        orderId
-    );
+    `).get(orderId);
 }
 
-function getPendingOrder(userId) {
+function getPendingOrder(
+    userId
+) {
 
     return db.prepare(`
 
         SELECT *
+
         FROM payments
 
-        WHERE
-            user_id = ?
-            AND status = 'pending'
+        WHERE user_id = ?
+
+        AND status = 'pending'
 
         ORDER BY created_at DESC
 
         LIMIT 1
 
-    `).get(
-        userId
-    );
+    `).get(userId);
 }
 
-function confirmOrder(orderId) {
+function confirmOrder(
+    orderId
+) {
 
     const order =
-        getOrder(
-            orderId
-        );
+        getOrder(orderId);
 
     if (!order) {
 
@@ -1133,6 +1105,7 @@ function confirmOrder(orderId) {
 
         WHERE
             order_id = ?
+
             AND status = 'pending'
 
     `).run(
@@ -1165,20 +1138,18 @@ function confirmOrder(orderId) {
         userId:
             order.user_id,
 
-        until:
-            until,
+        until,
 
-        order:
-            order
+        order
     };
 }
 
-function rejectOrder(orderId) {
+function rejectOrder(
+    orderId
+) {
 
     const order =
-        getOrder(
-            orderId
-        );
+        getOrder(orderId);
 
     if (!order) {
 
@@ -1207,11 +1178,10 @@ function rejectOrder(orderId) {
 
         WHERE
             order_id = ?
+
             AND status = 'pending'
 
-    `).run(
-        orderId
-    );
+    `).run(orderId);
 
     return {
 
@@ -1220,8 +1190,7 @@ function rejectOrder(orderId) {
         userId:
             order.user_id,
 
-        order:
-            order
+        order
     };
 }
 
@@ -1279,6 +1248,10 @@ function mainMenu() {
     };
 }
 
+// ============================================================
+// BUY MENU
+// ============================================================
+
 function buyMenu() {
 
     return {
@@ -1290,20 +1263,20 @@ function buyMenu() {
                 [
                     {
                         text:
-                            "50 ₽ — 3 дня",
+                            "80 ₽ — 3 дня",
 
                         callback_data:
-                            "buy_50"
+                            "buy_80"
                     }
                 ],
 
                 [
                     {
                         text:
-                            "200 ₽ — 1 месяц",
+                            "350 ₽ — 1 месяц",
 
                         callback_data:
-                            "buy_200"
+                            "buy_350"
                     }
                 ],
 
@@ -1362,6 +1335,10 @@ function buyMenu() {
     };
 }
 
+// ============================================================
+// AUTH MENU
+// ============================================================
+
 function authMenu() {
 
     return {
@@ -1394,6 +1371,10 @@ function authMenu() {
         }
     };
 }
+
+// ============================================================
+// ADMIN MENU
+// ============================================================
 
 function adminMenu() {
 
@@ -1428,7 +1409,13 @@ function adminMenu() {
     };
 }
 
-function adminOrderButtons(orderId) {
+// ============================================================
+// ADMIN ORDER BUTTONS
+// ============================================================
+
+function adminOrderButtons(
+    orderId
+) {
 
     return {
 
@@ -1462,8 +1449,11 @@ function adminOrderButtons(orderId) {
 }
 
 // ============================================================
-// ADMIN STATE
+// STATES
 // ============================================================
+
+const userStates =
+    new Map();
 
 const adminWaitingTime =
     new Set();
@@ -1477,14 +1467,10 @@ async function startRegistration(
     userId
 ) {
 
-    clearAuth(
-        userId
-    );
+    clearAuth(userId);
 
     userStates.set(
-
         userId,
-
         {
             type:
                 "register",
@@ -1499,7 +1485,6 @@ async function startRegistration(
         chatId,
 
         "📝 Регистрация\n\n" +
-
         "Введите ваше имя:"
     );
 }
@@ -1513,14 +1498,10 @@ async function startLogin(
     userId
 ) {
 
-    clearAuth(
-        userId
-    );
+    clearAuth(userId);
 
     userStates.set(
-
         userId,
-
         {
             type:
                 "login",
@@ -1535,13 +1516,12 @@ async function startLogin(
         chatId,
 
         "🔐 Вход\n\n" +
-
         "Введите email:"
     );
 }
 
 // ============================================================
-// FORGOT
+// FORGOT PASSWORD
 // ============================================================
 
 async function startForgotPassword(
@@ -1549,14 +1529,10 @@ async function startForgotPassword(
     userId
 ) {
 
-    clearAuth(
-        userId
-    );
+    clearAuth(userId);
 
     userStates.set(
-
         userId,
-
         {
             type:
                 "forgot",
@@ -1571,7 +1547,6 @@ async function startForgotPassword(
         chatId,
 
         "🔑 Восстановление пароля\n\n" +
-
         "Введите email:"
     );
 }
@@ -1642,7 +1617,7 @@ bot.onText(
 );
 
 // ============================================================
-// /id
+// /ID
 // ============================================================
 
 bot.onText(
@@ -1661,7 +1636,7 @@ bot.onText(
 );
 
 // ============================================================
-// /admin
+// /ADMIN
 // ============================================================
 
 bot.onText(
@@ -1703,7 +1678,6 @@ bot.on(
 
         try {
 
-            // Фото и документы обрабатываются отдельно
             if (!msg.text)
                 return;
 
@@ -1731,9 +1705,7 @@ bot.on(
             ) {
 
                 const seconds =
-                    parseOfflineTime(
-                        text
-                    );
+                    parseOfflineTime(text);
 
                 if (
                     seconds === "MAX"
@@ -1743,7 +1715,14 @@ bot.on(
 
                         msg.chat.id,
 
-                        "❌ Максимум — 15 дней."
+                        "❌ Максимум — 15 дней.\n\n" +
+
+                        "Примеры:\n" +
+                        "5h\n" +
+                        "5m\n" +
+                        "5s\n" +
+                        "5d\n" +
+                        "2d 5h 30m"
                     );
 
                     return;
@@ -1759,11 +1738,13 @@ bot.on(
 
                         "❌ Неверный формат.\n\n" +
 
-                        "Примеры:\n" +
+                        "Используйте:\n" +
                         "5h\n" +
                         "5m\n" +
                         "5s\n" +
-                        "5d\n" +
+                        "5d\n\n" +
+
+                        "Можно:\n" +
                         "2d 5h 30m"
                     );
 
@@ -1772,15 +1753,12 @@ bot.on(
 
                 const until =
                     new Date(
-
                         Date.now() +
                         seconds * 1000
                     );
 
                 setAdminOffline(
-
                     userId,
-
                     until
                 );
 
@@ -1795,10 +1773,15 @@ bot.on(
                     "🔴 Вы теперь не онлайн.\n\n" +
 
                     `⏱ Время: ` +
-                    `${formatDuration(seconds)}\n\n` +
+                    `${formatDuration(seconds)}\n` +
 
                     `🕐 До: ` +
-                    `${until.toLocaleString("ru-RU")}`,
+                    `${until.toLocaleString(
+                        "ru-RU"
+                    )}\n\n` +
+
+                    "Когда вернётесь, " +
+                    "нажмите «🟢 Я онлайн».",
 
                     adminMenu()
                 );
@@ -1812,7 +1795,8 @@ bot.on(
 
             if (
                 isAdmin(userId) &&
-                text === "🟢 Я онлайн"
+                text ===
+                "🟢 Я онлайн"
             ) {
 
                 setAdminOnline(
@@ -1838,7 +1822,8 @@ bot.on(
 
             if (
                 isAdmin(userId) &&
-                text === "🔴 Я не онлайн"
+                text ===
+                "🔴 Я не онлайн"
             ) {
 
                 adminWaitingTime.add(
@@ -1868,13 +1853,12 @@ bot.on(
             // ==================================================
 
             if (
-                text === "📝 Регистрация"
+                text ===
+                "📝 Регистрация"
             ) {
 
                 return startRegistration(
-
                     msg.chat.id,
-
                     userId
                 );
             }
@@ -1884,13 +1868,12 @@ bot.on(
             // ==================================================
 
             if (
-                text === "🔐 Войти"
+                text ===
+                "🔐 Войти"
             ) {
 
                 return startLogin(
-
                     msg.chat.id,
-
                     userId
                 );
             }
@@ -1900,23 +1883,24 @@ bot.on(
             // ==================================================
 
             if (
-                text === "🛠 Тех.поддержка"
+                text ===
+                "🛠 Тех.поддержка"
             ) {
 
-                await bot.sendMessage(
+                return bot.sendMessage(
 
                     msg.chat.id,
 
                     "🛠 Тех.поддержка\n\n" +
 
-                    "По приложению:\n" +
+                    `Тех.поддержка по приложению: ` +
                     `${APP_SUPPORT}\n\n` +
 
-                    "По боту:\n" +
-                    `${BOT_SUPPORT}`
-                );
+                    `Тех.поддержка по боту: ` +
+                    `${BOT_SUPPORT}`,
 
-                return;
+                    mainMenu()
+                );
             }
 
             // ==================================================
@@ -1924,10 +1908,11 @@ bot.on(
             // ==================================================
 
             if (
-                text === "🛒 Купить"
+                text ===
+                "🛒 Купить"
             ) {
 
-                await bot.sendMessage(
+                return bot.sendMessage(
 
                     msg.chat.id,
 
@@ -1935,8 +1920,6 @@ bot.on(
 
                     buyMenu()
                 );
-
-                return;
             }
 
             // ==================================================
@@ -1944,10 +1927,11 @@ bot.on(
             // ==================================================
 
             if (
-                text === "ℹ️ Помощь"
+                text ===
+                "ℹ️ Помощь"
             ) {
 
-                await bot.sendMessage(
+                return bot.sendMessage(
 
                     msg.chat.id,
 
@@ -1957,15 +1941,17 @@ bot.on(
                     "создать аккаунт.\n\n" +
 
                     "🔐 Войти — " +
-                    "войти по email и паролю.\n\n" +
+                    "вход по email и паролю.\n\n" +
 
                     "🛒 Купить — " +
-                    "купить подписку.\n\n" +
+                    "приобрести подписку.\n\n" +
 
                     "🛠 Тех.поддержка — " +
                     "связаться с поддержкой.\n\n" +
 
-                    `💳 Карта:\n${CARD_ID}\n\n` +
+                    "💳 Реквизиты:\n" +
+
+                    `Карта: ${CARD_NUMBER}\n` +
 
                     `${CARD_HOLDER}\n\n` +
 
@@ -1973,12 +1959,10 @@ bot.on(
 
                     mainMenu()
                 );
-
-                return;
             }
 
             // ==================================================
-            // CURRENT STATE
+            // STATE
             // ==================================================
 
             const state =
@@ -1994,12 +1978,17 @@ bot.on(
             // ==================================================
 
             if (
-                state.type === "register"
+                state.type ===
+                "register"
             ) {
 
+                // ==================================================
                 // NAME
+                // ==================================================
+
                 if (
-                    state.step === "name"
+                    state.step ===
+                    "name"
                 ) {
 
                     if (
@@ -2012,7 +2001,8 @@ bot.on(
                             msg.chat.id,
 
                             "❌ Имя должно " +
-                            "содержать от 2 до 100 символов."
+                            "содержать от 2 " +
+                            "до 100 символов."
                         );
 
                         return;
@@ -2041,9 +2031,13 @@ bot.on(
                     return;
                 }
 
+                // ==================================================
                 // EMAIL
+                // ==================================================
+
                 if (
-                    state.step === "email"
+                    state.step ===
+                    "email"
                 ) {
 
                     const email =
@@ -2052,16 +2046,16 @@ bot.on(
                         );
 
                     if (
-                        !validEmail(email)
+                        !validEmail(
+                            email
+                        )
                     ) {
 
                         await bot.sendMessage(
 
                             msg.chat.id,
 
-                            "❌ Неверный формат email.\n\n" +
-                            "Пример:\n" +
-                            "example@gmail.com"
+                            "❌ Неверный формат email."
                         );
 
                         return;
@@ -2085,7 +2079,9 @@ bot.on(
 
                             msg.chat.id,
 
-                            "❌ Этот email уже зарегистрирован.\n\n" +
+                            "❌ Этот email " +
+                            "уже зарегистрирован.\n\n" +
+
                             "Нажмите «🔐 Войти».",
 
                             mainMenu()
@@ -2096,10 +2092,6 @@ bot.on(
 
                     const code =
                         generateCode();
-
-                    console.log(
-                        `📧 Отправка кода ${email}: ${code}`
-                    );
 
                     try {
 
@@ -2115,35 +2107,40 @@ bot.on(
                     } catch (error) {
 
                         console.error(
-                            "=========================================="
+                            "================================"
                         );
 
                         console.error(
-                            "❌ ОШИБКА ОТПРАВКИ EMAIL"
+                            "❌ SMTP MAIL ERROR"
                         );
 
                         console.error(
-                            "CODE:",
-                            error.code
-                        );
-
-                        console.error(
-                            "COMMAND:",
-                            error.command
-                        );
-
-                        console.error(
-                            "RESPONSE:",
-                            error.response
-                        );
-
-                        console.error(
-                            "MESSAGE:",
+                            "message:",
                             error.message
                         );
 
                         console.error(
-                            "=========================================="
+                            "code:",
+                            error.code
+                        );
+
+                        console.error(
+                            "command:",
+                            error.command
+                        );
+
+                        console.error(
+                            "response:",
+                            error.response
+                        );
+
+                        console.error(
+                            "responseCode:",
+                            error.responseCode
+                        );
+
+                        console.error(
+                            "================================"
                         );
 
                         await bot.sendMessage(
@@ -2154,7 +2151,8 @@ bot.on(
 
                             "Проверьте SMTP-настройки Railway.\n\n" +
 
-                            "Если проблема повторяется, обратитесь в поддержку."
+                            "Если проблема повторяется, " +
+                            "обратитесь в поддержку."
                         );
 
                         return;
@@ -2190,9 +2188,6 @@ bot.on(
                     state.step =
                         "code";
 
-                    state.email =
-                        email;
-
                     userStates.set(
                         userId,
                         state
@@ -2202,7 +2197,7 @@ bot.on(
 
                         msg.chat.id,
 
-                        "📨 Код отправлен на:\n\n" +
+                        "📨 Код отправлен на:\n" +
                         `${email}\n\n` +
 
                         "Введите 6-значный код:"
@@ -2211,9 +2206,13 @@ bot.on(
                     return;
                 }
 
+                // ==================================================
                 // CODE
+                // ==================================================
+
                 if (
-                    state.step === "code"
+                    state.step ===
+                    "code"
                 ) {
 
                     const pending =
@@ -2223,7 +2222,8 @@ bot.on(
 
                     if (
                         !pending ||
-                        pending.type !== "register"
+                        pending.type !==
+                        "register"
                     ) {
 
                         userStates.delete(
@@ -2234,7 +2234,9 @@ bot.on(
 
                             msg.chat.id,
 
-                            "❌ Сессия регистрации истекла.\n\n" +
+                            "❌ Сессия регистрации " +
+                            "истекла.\n\n" +
+
                             "Нажмите «📝 Регистрация»."
                         );
 
@@ -2288,7 +2290,9 @@ bot.on(
 
                                 msg.chat.id,
 
-                                "❌ Слишком много неверных попыток.\n\n" +
+                                "❌ Слишком много " +
+                                "неверных попыток.\n\n" +
+
                                 "Начните регистрацию заново."
                             );
 
@@ -2306,15 +2310,15 @@ bot.on(
                         return;
                     }
 
-                    pendingAuth.delete(
-                        userId
-                    );
-
                     state.step =
                         "password";
 
                     state.email =
                         pending.email;
+
+                    pendingAuth.delete(
+                        userId
+                    );
 
                     userStates.set(
                         userId,
@@ -2332,20 +2336,27 @@ bot.on(
                     return;
                 }
 
+                // ==================================================
                 // PASSWORD
+                // ==================================================
+
                 if (
-                    state.step === "password"
+                    state.step ===
+                    "password"
                 ) {
 
                     if (
-                        !validPassword(text)
+                        !validPassword(
+                            text
+                        )
                     ) {
 
                         await bot.sendMessage(
 
                             msg.chat.id,
 
-                            "❌ Пароль должен быть от 6 до 128 символов."
+                            "❌ Пароль должен " +
+                            "быть от 6 до 128 символов."
                         );
 
                         return;
@@ -2374,9 +2385,13 @@ bot.on(
                     return;
                 }
 
-                // PASSWORD 2
+                // ==================================================
+                // PASSWORD CONFIRM
+                // ==================================================
+
                 if (
-                    state.step === "password2"
+                    state.step ===
+                    "password2"
                 ) {
 
                     if (
@@ -2413,7 +2428,8 @@ bot.on(
 
                             msg.chat.id,
 
-                            "❌ Этот email уже используется.",
+                            "❌ Этот email " +
+                            "уже используется.",
 
                             mainMenu()
                         );
@@ -2480,12 +2496,13 @@ bot.on(
             // ==================================================
 
             if (
-                state.type === "login"
+                state.type ===
+                "login"
             ) {
 
-                // EMAIL
                 if (
-                    state.step === "email"
+                    state.step ===
+                    "email"
                 ) {
 
                     const email =
@@ -2494,7 +2511,9 @@ bot.on(
                         );
 
                     if (
-                        !validEmail(email)
+                        !validEmail(
+                            email
+                        )
                     ) {
 
                         await bot.sendMessage(
@@ -2518,19 +2537,22 @@ bot.on(
                         !user.password_hash
                     ) {
 
+                        userStates.delete(
+                            userId
+                        );
+
                         await bot.sendMessage(
 
                             msg.chat.id,
 
-                            "❌ Аккаунт с таким подтверждённым email не найден.\n\n" +
+                            "❌ Аккаунт с таким " +
+                            "подтверждённым email " +
+                            "не найден.\n\n" +
 
-                            "Если аккаунта нет, нажмите «📝 Регистрация».",
+                            "Если аккаунта нет, " +
+                            "нажмите «📝 Регистрация».",
 
                             mainMenu()
-                        );
-
-                        userStates.delete(
-                            userId
                         );
 
                         return;
@@ -2559,9 +2581,9 @@ bot.on(
                     return;
                 }
 
-                // PASSWORD
                 if (
-                    state.step === "password"
+                    state.step ===
+                    "password"
                 ) {
 
                     const user =
@@ -2579,8 +2601,12 @@ bot.on(
 
                             msg.chat.id,
 
-                            "❌ Неверный email или пароль.\n\n" +
-                            "Попробуйте ещё раз или выберите «Забыли пароль».",
+                            "❌ Неверный email " +
+                            "или пароль.\n\n" +
+
+                            "Попробуйте ещё раз " +
+                            "или выберите " +
+                            "«Забыли пароль».",
 
                             authMenu()
                         );
@@ -2597,7 +2623,7 @@ bot.on(
 
                     if (
                         isSubActive(
-                            user.user_id
+                            userId
                         )
                     ) {
 
@@ -2609,14 +2635,10 @@ bot.on(
                             );
 
                         subscriptionText =
-
                             "✅ Подписка активна.\n\n" +
-
                             `📅 До: ${until}\n\n` +
-
                             "🔑 Ваш ключ:\n" +
-
-                            `\`${user.user_id}\``;
+                            `\`${userId}\``;
                     }
 
                     await bot.sendMessage(
@@ -2626,7 +2648,7 @@ bot.on(
                         "✅ Вход выполнен!\n\n" +
 
                         `👤 Имя: ` +
-                        `${user.name || "не указано"}\n\n` +
+                        `${user.name || "не указано"}\n` +
 
                         `📧 Email: ` +
                         `${user.email}\n\n` +
@@ -2650,12 +2672,13 @@ bot.on(
             // ==================================================
 
             if (
-                state.type === "forgot"
+                state.type ===
+                "forgot"
             ) {
 
-                // EMAIL
                 if (
-                    state.step === "email"
+                    state.step ===
+                    "email"
                 ) {
 
                     const email =
@@ -2664,7 +2687,9 @@ bot.on(
                         );
 
                     if (
-                        !validEmail(email)
+                        !validEmail(
+                            email
+                        )
                     ) {
 
                         await bot.sendMessage(
@@ -2691,7 +2716,9 @@ bot.on(
 
                             msg.chat.id,
 
-                            "❌ Подтверждённый аккаунт с таким email не найден."
+                            "❌ Подтверждённый " +
+                            "аккаунт с таким email " +
+                            "не найден."
                         );
 
                         return;
@@ -2714,7 +2741,7 @@ bot.on(
                     } catch (error) {
 
                         console.error(
-                            "FORGOT MAIL ERROR:",
+                            "SMTP RESET ERROR:",
                             error
                         );
 
@@ -2764,18 +2791,20 @@ bot.on(
 
                         msg.chat.id,
 
-                        "📨 Код восстановления отправлен на:\n\n" +
+                        "📨 Код восстановления " +
+                        "отправлен на:\n" +
+
                         `${email}\n\n` +
 
-                        "Введите 6-значный код:"
+                        "Введите код:"
                     );
 
                     return;
                 }
 
-                // CODE
                 if (
-                    state.step === "code"
+                    state.step ===
+                    "code"
                 ) {
 
                     const pending =
@@ -2785,7 +2814,8 @@ bot.on(
 
                     if (
                         !pending ||
-                        pending.type !== "forgot"
+                        pending.type !==
+                        "forgot"
                     ) {
 
                         await bot.sendMessage(
@@ -2844,7 +2874,8 @@ bot.on(
 
                                 msg.chat.id,
 
-                                "❌ Слишком много неверных попыток."
+                                "❌ Слишком много " +
+                                "неверных попыток."
                             );
 
                             return;
@@ -2883,20 +2914,23 @@ bot.on(
                     return;
                 }
 
-                // NEW PASSWORD
                 if (
-                    state.step === "new_password"
+                    state.step ===
+                    "new_password"
                 ) {
 
                     if (
-                        !validPassword(text)
+                        !validPassword(
+                            text
+                        )
                     ) {
 
                         await bot.sendMessage(
 
                             msg.chat.id,
 
-                            "❌ Пароль должен быть от 6 до 128 символов."
+                            "❌ Пароль должен " +
+                            "быть от 6 до 128 символов."
                         );
 
                         return;
@@ -2925,7 +2959,6 @@ bot.on(
                     return;
                 }
 
-                // CONFIRM
                 if (
                     state.step ===
                     "new_password2"
@@ -2953,7 +2986,7 @@ bot.on(
                         SET password_hash = ?
 
                         WHERE lower(email) =
-                              lower(?)
+                        lower(?)
 
                     `).run(
 
@@ -2989,12 +3022,13 @@ bot.on(
             // ==================================================
 
             if (
-                state.type === "buy"
+                state.type ===
+                "buy"
             ) {
 
-                // NAME
                 if (
-                    state.step === "name"
+                    state.step ===
+                    "name"
                 ) {
 
                     if (
@@ -3006,7 +3040,9 @@ bot.on(
 
                             msg.chat.id,
 
-                            "❌ Имя должно содержать от 2 до 100 символов."
+                            "❌ Имя должно " +
+                            "содержать от 2 " +
+                            "до 100 символов."
                         );
 
                         return;
@@ -3027,15 +3063,16 @@ bot.on(
 
                         msg.chat.id,
 
-                        "📧 Введите email для заказа:"
+                        "📧 Введите email " +
+                        "для заказа:"
                     );
 
                     return;
                 }
 
-                // EMAIL
                 if (
-                    state.step === "email"
+                    state.step ===
+                    "email"
                 ) {
 
                     const email =
@@ -3044,7 +3081,9 @@ bot.on(
                         );
 
                     if (
-                        !validEmail(email)
+                        !validEmail(
+                            email
+                        )
                     ) {
 
                         await bot.sendMessage(
@@ -3072,7 +3111,9 @@ bot.on(
 
                             msg.chat.id,
 
-                            "❌ Тариф не найден."
+                            "❌ Тариф не найден.",
+
+                            mainMenu()
                         );
 
                         return;
@@ -3117,17 +3158,19 @@ bot.on(
 
                         "💳 Реквизиты для оплаты:\n\n" +
 
-                        `Карта: \`${CARD_ID}\`\n` +
+                        `Карта: ` +
+                        `\`${CARD_NUMBER}\`\n` +
 
                         `${CARD_HOLDER}\n\n` +
 
-                        "⚠️ В комментарии к переводу " +
+                        "⚠️ В комментарии " +
+                        "к переводу обязательно " +
                         "укажите номер заказа:\n\n" +
 
                         `\`${orderId}\`\n\n` +
 
-                        "После оплаты нажмите кнопку ниже " +
-                        "и отправьте чек.",
+                        "После оплаты нажмите " +
+                        "кнопку ниже и отправьте чек.",
 
                         {
 
@@ -3209,7 +3252,8 @@ bot.on(
             // ==================================================
 
             if (
-                data === "admin_online"
+                data ===
+                "admin_online"
             ) {
 
                 if (
@@ -3264,7 +3308,8 @@ bot.on(
             // ==================================================
 
             if (
-                data === "admin_offline"
+                data ===
+                "admin_offline"
             ) {
 
                 if (
@@ -3307,6 +3352,9 @@ bot.on(
                     "5s\n" +
                     "5d\n\n" +
 
+                    "Можно:\n" +
+                    "2d 5h 30m\n\n" +
+
                     "⚠️ Максимум — 15 дней."
                 );
 
@@ -3318,7 +3366,8 @@ bot.on(
             // ==================================================
 
             if (
-                data === "forgot_password"
+                data ===
+                "forgot_password"
             ) {
 
                 await bot.answerCallbackQuery(
@@ -3326,9 +3375,7 @@ bot.on(
                 );
 
                 return startForgotPassword(
-
                     chatId,
-
                     userId
                 );
             }
@@ -3338,7 +3385,8 @@ bot.on(
             // ==================================================
 
             if (
-                data === "back"
+                data ===
+                "back"
             ) {
 
                 clearAuth(
@@ -3371,16 +3419,16 @@ bot.on(
             // ==================================================
 
             if (
-                data.startsWith("buy_")
+                data.startsWith(
+                    "buy_"
+                )
             ) {
 
                 const tariffKey =
                     data.substring(4);
 
                 const tariff =
-                    TARIFFS[
-                        tariffKey
-                    ];
+                    TARIFFS[tariffKey];
 
                 if (!tariff) {
 
@@ -3401,9 +3449,7 @@ bot.on(
                 }
 
                 upsertUser(
-
                     userId,
-
                     query.from.username ||
                     null
                 );
@@ -3434,7 +3480,7 @@ bot.on(
                     chatId,
 
                     `📦 Вы выбрали: ` +
-                    `${tariff.name}\n\n` +
+                    `${tariff.name}\n` +
 
                     `💰 Цена: ` +
                     `${tariff.price} ₽\n\n` +
@@ -3450,7 +3496,9 @@ bot.on(
             // ==================================================
 
             if (
-                data.startsWith("confirm_")
+                data.startsWith(
+                    "confirm_"
+                )
             ) {
 
                 if (
@@ -3493,9 +3541,7 @@ bot.on(
                             text:
                                 result.reason ===
                                 "already_processed"
-
                                     ? "Заказ уже обработан"
-
                                     : "Заказ не найден",
 
                             show_alert:
@@ -3526,7 +3572,6 @@ bot.on(
                         },
 
                         {
-
                             chat_id:
                                 chatId,
 
@@ -3544,12 +3589,12 @@ bot.on(
                     "🎉 Оплата подтверждена!\n\n" +
 
                     `👤 Имя: ` +
-                    `${result.order.name}\n\n` +
+                    `${result.order.name}\n` +
 
                     `📧 Email: ` +
                     `${result.order.email}\n\n` +
 
-                    "📦 Тариф: " +
+                    `📦 Тариф: ` +
                     `${TARIFFS[
                         result.order.tariff
                     ].name}\n\n` +
@@ -3578,7 +3623,9 @@ bot.on(
             // ==================================================
 
             if (
-                data.startsWith("reject_")
+                data.startsWith(
+                    "reject_"
+                )
             ) {
 
                 if (
@@ -3649,7 +3696,6 @@ bot.on(
                         },
 
                         {
-
                             chat_id:
                                 chatId,
 
@@ -3664,10 +3710,12 @@ bot.on(
 
                     result.userId,
 
-                    "❌ Ваша оплата не была подтверждена.\n\n" +
+                    "❌ Ваша оплата " +
+                    "не была подтверждена.\n\n" +
 
-                    `🛠 Поддержка приложения: ${APP_SUPPORT}\n` +
-                    `🛠 Поддержка бота: ${BOT_SUPPORT}`
+                    `По заказу: ${orderId}\n\n` +
+
+                    "Свяжитесь с поддержкой."
                 );
 
                 return;
@@ -3678,7 +3726,9 @@ bot.on(
             // ==================================================
 
             if (
-                data.startsWith("paid_")
+                data.startsWith(
+                    "paid_"
+                )
             ) {
 
                 const orderId =
@@ -3696,7 +3746,6 @@ bot.on(
                         query.id,
 
                         {
-
                             text:
                                 "Заказ не найден",
 
@@ -3718,9 +3767,8 @@ bot.on(
                         query.id,
 
                         {
-
                             text:
-                                "Этот заказ принадлежит другому пользователю",
+                                "Это не ваш заказ",
 
                             show_alert:
                                 true
@@ -3741,10 +3789,10 @@ bot.on(
                     "📷 Отправьте чек оплаты.\n\n" +
 
                     `🧾 Заказ: ` +
-                    `\`${orderId}\`\n\n` +
+                    `\`${orderId}\`\n` +
 
                     `👤 Имя: ` +
-                    `${order.name}\n\n` +
+                    `${order.name}\n` +
 
                     `📧 Email: ` +
                     `${order.email}\n\n` +
@@ -3777,7 +3825,6 @@ bot.on(
                     query.id,
 
                     {
-
                         text:
                             "Произошла ошибка",
 
@@ -3795,7 +3842,9 @@ bot.on(
 // RECEIPT
 // ============================================================
 
-async function handleReceipt(msg) {
+async function handleReceipt(
+    msg
+) {
 
     try {
 
@@ -3810,7 +3859,8 @@ async function handleReceipt(msg) {
 
                 msg.chat.id,
 
-                "❌ У вас нет ожидающего заказа."
+                "❌ У вас нет " +
+                "ожидающего заказа."
             );
 
             return;
@@ -3822,9 +3872,11 @@ async function handleReceipt(msg) {
 
             "✅ Чек получен!\n\n" +
 
-            `🧾 Заказ: ${order.order_id}\n\n` +
+            `🧾 Заказ: ` +
+            `${order.order_id}\n\n` +
 
-            "Ожидайте проверки администратора."
+            "Ожидайте проверки " +
+            "администратора."
         );
 
         const username =
@@ -3840,13 +3892,13 @@ async function handleReceipt(msg) {
             `\`${order.order_id}\`\n\n` +
 
             `👤 Имя: ` +
-            `${order.name}\n\n` +
+            `${order.name}\n` +
 
             `📧 Email: ` +
-            `${order.email}\n\n` +
+            `${order.email}\n` +
 
             `👤 User ID: ` +
-            `${order.user_id}\n\n` +
+            `${order.user_id}\n` +
 
             `👤 Username: ` +
             `${username}\n\n` +
@@ -3854,7 +3906,7 @@ async function handleReceipt(msg) {
             `📦 Тариф: ` +
             `${TARIFFS[
                 order.tariff
-            ].name}\n\n` +
+            ].name}\n` +
 
             `💰 Сумма: ` +
             `${order.amount} ₽`;
@@ -3895,7 +3947,6 @@ async function handleReceipt(msg) {
                     `\`${order.order_id}\`:`,
                     
                     {
-
                         parse_mode:
                             "Markdown",
 
@@ -3909,7 +3960,7 @@ async function handleReceipt(msg) {
 
                 console.error(
 
-                    `❌ Ошибка отправки админу ${adminId}:`,
+                    `Ошибка отправки админу ${adminId}:`,
 
                     error.message
                 );
@@ -3925,6 +3976,10 @@ async function handleReceipt(msg) {
     }
 }
 
+// ============================================================
+// PHOTO / DOCUMENT
+// ============================================================
+
 bot.on(
     "photo",
     handleReceipt
@@ -3936,7 +3991,7 @@ bot.on(
 );
 
 // ============================================================
-// ERRORS
+// ERROR HANDLERS
 // ============================================================
 
 bot.on(
@@ -3961,7 +4016,7 @@ console.log(
 );
 
 console.log(
-    "🤖 J.A.R.V.I.S BOT ЗАПУЩЕН"
+    "🤖 J.A.R.B.I.S BOT ЗАПУЩЕН"
 );
 
 console.log(
@@ -3972,11 +4027,6 @@ console.log(
 console.log(
     "🛠 SUPPORT BOT:",
     BOT_SUPPORT
-);
-
-console.log(
-    "💳 CARD:",
-    CARD_ID
 );
 
 console.log(
@@ -3994,6 +4044,11 @@ console.log(
     SMTP_HOST,
     SMTP_PORT,
     SMTP_USER
+);
+
+console.log(
+    "💳 CARD:",
+    CARD_NUMBER
 );
 
 console.log(
